@@ -256,7 +256,7 @@ export async function getStorefrontProducts(
       is_bulky: p.is_bulky,
       is_featured: p.is_featured,
       primary_image_url: primaryImg?.url ?? null,
-      primary_image_alt: primaryImg?.alt ?? p.name,
+      primary_image_alt: primaryImg?.alt_text ?? p.name,
       category_name: cat?.name ?? null,
       category_slug: cat?.slug ?? null,
     };
@@ -373,10 +373,34 @@ export async function getStorefrontProductBySlug(
     requires_insured_courier: product.requires_insured_courier,
     is_featured: product.is_featured,
     primary_image_url: primaryImg?.public_url ?? null,
-    primary_image_alt: primaryImg?.alt ?? product.name,
+    primary_image_alt: primaryImg?.alt_text ?? product.name,
     category_name: cat?.name ?? null,
     category_slug: cat?.slug ?? null,
     images: gallery,
     store,
   };
+}
+
+export type StorefrontPolicy = {
+  id: string;
+  policy_type: "returns" | "warranty" | "delivery" | "privacy" | "terms";
+  title: string;
+  content_markdown: string;
+};
+
+export async function getPublishedStorePolicies(
+  storeId: string
+): Promise<StorefrontPolicy[]> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("store_policies")
+    .select("id, policy_type, title, content_markdown")
+    .eq("store_id", storeId)
+    .eq("is_published", true)
+    .order("policy_type", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load store policies: ${error.message}`);
+  }
+  return (data ?? []) as StorefrontPolicy[];
 }
