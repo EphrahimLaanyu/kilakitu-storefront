@@ -9,6 +9,27 @@ export type StorefrontCategory = {
   sort_order: number;
 };
 
+export type StorefrontProductImage = {
+  id: string;
+  public_url: string;
+  alt_text: string | null;
+  is_primary: boolean;
+  sort_order: number;
+};
+
+export type StorefrontStoreInfo = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  logo_url: string | null;
+  primary_color: string | null;
+  phone: string;
+  whatsapp_number: string;
+  pickup_address: string;
+  opening_hours: string | null;
+};
+
 export type StorefrontProductCard = {
   id: string;
   store_id: string;
@@ -42,22 +63,8 @@ export type StorefrontProductDetail = StorefrontProductCard & {
   specs: Record<string, string>;
   warranty_notes: string | null;
   requires_insured_courier: boolean;
-  images: {
-    id: string;
-    public_url: string;
-    alt_text: string | null;
-    is_primary: boolean;
-    sort_order: number;
-  }[];
-  store: {
-    id: string;
-    name: string;
-    slug: string;
-    phone: string;
-    whatsapp_number: string;
-    pickup_address: string;
-    opening_hours: string | null;
-  };
+  images: StorefrontProductImage[];
+  store: StorefrontStoreInfo;
 };
 
 export type StorefrontDeliveryZone = {
@@ -71,6 +78,13 @@ export type StorefrontDeliveryZone = {
   cutoff_time_text: string | null;
 };
 
+export type StorefrontPolicy = {
+  id: string;
+  policy_type: "returns" | "warranty" | "delivery" | "privacy" | "terms";
+  title: string;
+  content_markdown: string;
+};
+
 export type StorefrontCatalogFilter = {
   search?: string;
   categorySlug?: string;
@@ -79,7 +93,9 @@ export type StorefrontCatalogFilter = {
   onlyAvailable?: boolean;
 };
 
-export async function getActiveStoreBySlug(slug: string) {
+export async function getActiveStoreBySlug(
+  slug: string
+): Promise<StorefrontStoreInfo | null> {
   const supabase = await createClient();
   const { data, error } = await supabase
     .from("stores")
@@ -93,7 +109,8 @@ export async function getActiveStoreBySlug(slug: string) {
   if (error || !data) {
     return null;
   }
-  return data;
+
+  return data as StorefrontStoreInfo;
 }
 
 export async function getStorefrontCategories(): Promise<StorefrontCategory[]> {
@@ -108,7 +125,8 @@ export async function getStorefrontCategories(): Promise<StorefrontCategory[]> {
   if (error) {
     throw new Error(`Failed to load storefront categories: ${error.message}`);
   }
-  return data ?? [];
+
+  return (data ?? []) as StorefrontCategory[];
 }
 
 export async function getStorefrontProducts(
@@ -119,8 +137,8 @@ export async function getStorefrontProducts(
   brands: string[];
 }> {
   const supabase = await createClient();
-  const categories = await getStorefrontCategories();
 
+  const categories = await getStorefrontCategories();
   const categoryById = new Map<string, StorefrontCategory>();
   const categoryBySlug = new Map<string, StorefrontCategory>();
   for (const cat of categories) {
@@ -211,7 +229,10 @@ export async function getStorefrontProducts(
   const brands = Array.from(brandSet).sort((a, b) => a.localeCompare(b));
 
   const productIds = productRows.map((p) => p.id);
-  const imageMap = new Map<string, { url: string; alt: string | null }>();
+  const imageMap = new Map<
+    string,
+    { public_url: string; alt_text: string | null }
+  >();
 
   if (productIds.length > 0) {
     const { data: images } = await supabase
@@ -224,8 +245,8 @@ export async function getStorefrontProducts(
     for (const img of images ?? []) {
       if (!imageMap.has(img.product_id)) {
         imageMap.set(img.product_id, {
-          url: img.public_url,
-          alt: img.alt_text,
+          public_url: img.public_url,
+          alt_text: img.alt_text,
         });
       }
     }
@@ -255,7 +276,7 @@ export async function getStorefrontProducts(
       stock_quantity: p.stock_quantity,
       is_bulky: p.is_bulky,
       is_featured: p.is_featured,
-      primary_image_url: primaryImg?.url ?? null,
+      primary_image_url: primaryImg?.public_url ?? null,
       primary_image_alt: primaryImg?.alt_text ?? p.name,
       category_name: cat?.name ?? null,
       category_slug: cat?.slug ?? null,
@@ -308,10 +329,11 @@ export async function getStorefrontProductBySlug(
     return null;
   }
 
+  const storeSlug =
+    process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
+
   const [store, { data: images }, categories] = await Promise.all([
-    getActiveStoreBySlug(
-      process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics"
-    ),
+    getActiveStoreBySlug(storeSlug),
     supabase
       .from("product_images")
       .select("id, public_url, alt_text, is_primary, sort_order")
@@ -343,7 +365,7 @@ export async function getStorefrontProductBySlug(
     }
   }
 
-  const gallery = images ?? [];
+  const gallery = (images ?? []) as StorefrontProductImage[];
   const primaryImg = gallery[0] ?? null;
 
   return {
@@ -381,13 +403,6 @@ export async function getStorefrontProductBySlug(
   };
 }
 
-export type StorefrontPolicy = {
-  id: string;
-  policy_type: "returns" | "warranty" | "delivery" | "privacy" | "terms";
-  title: string;
-  content_markdown: string;
-};
-
 export async function getPublishedStorePolicies(
   storeId: string
 ): Promise<StorefrontPolicy[]> {
@@ -402,5 +417,6 @@ export async function getPublishedStorePolicies(
   if (error) {
     throw new Error(`Failed to load store policies: ${error.message}`);
   }
+
   return (data ?? []) as StorefrontPolicy[];
 }
