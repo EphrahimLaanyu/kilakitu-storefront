@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { sanitizeNextPath } from "@/lib/auth/redirects";
+import { isProfileComplete as checkProfileComplete } from "@/lib/auth/profile";
 
 export type CartItem = {
   productId: string;
@@ -25,6 +26,12 @@ export type CartItem = {
 };
 
 export type AuthGateReason = "cart" | "checkout" | null;
+export type ProfileSetupReason =
+  | "onboarding"
+  | "cart"
+  | "checkout"
+  | "orders"
+  | null;
 
 type PendingCartAdd = {
   item: Omit<CartItem, "quantity">;
@@ -37,8 +44,14 @@ type CartContextValue = {
   lastAddedProductId: string | null;
   isAuthenticated: boolean;
   authLoading: boolean;
+  isProfileComplete: boolean;
+  profileLoading: boolean;
   authGateReason: AuthGateReason;
   authGateNextPath: string;
+  profileSetupOpen: boolean;
+  profileSetupReason: ProfileSetupReason;
+  profileSetupNextPath: string | null;
+  profileSetupRequired: boolean;
   totalCount: number;
   subtotalKes: number;
   hasBulkyItem: boolean;
@@ -48,7 +61,13 @@ type CartContextValue = {
     reason: Exclude<AuthGateReason, null>,
     nextPath?: string
   ) => void;
-  closeAuthGate: () => void;
+  closeAuthGate: (preservePending?: boolean) => void;
+  openProfileSetup: (
+    reason: Exclude<ProfileSetupReason, null>,
+    options?: { nextPath?: string | null; required?: boolean }
+  ) => void;
+  closeProfileSetup: () => void;
+  markProfileCompleted: () => void;
   addItem: (item: Omit<CartItem, "quantity">, qty?: number) => boolean;
   commitPendingItem: () => boolean;
   updateQuantity: (productId: string, quantity: number) => void;
@@ -68,8 +87,17 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   );
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
+  const [isProfileComplete, setIsProfileComplete] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(true);
   const [authGateReason, setAuthGateReason] = useState<AuthGateReason>(null);
   const [authGateNextPath, setAuthGateNextPath] = useState("/checkout");
+  const [profileSetupOpen, setProfileSetupOpen] = useState(false);
+  const [profileSetupReason, setProfileSetupReason] =
+    useState<ProfileSetupReason>(null);
+  const [profileSetupNextPath, setProfileSetupNextPath] = useState<
+    string | null
+  >(null);
+  const [profileSetupRequired, setProfileSetupRequired] = useState(false);
   const pendingAddRef = useRef<PendingCartAdd | null>(null);
 
   const appendCartItem = useCallback(
@@ -119,27 +147,52 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     let active = true;
     let verifySeq = 0;
 
-    async function verifyAuthUser() {
+    async function verifyAuthAndProfile() {
       const seq = ++verifySeq;
       try {
         const {
           data: { user },
         } = await supabase.auth.getUser();
         if (!active || seq !== verifySeq) return;
-        const signedIn = Boolean(user);
-        setIsAuthenticated(signedIn);
+
+        if (!user) {
+          setIsAuthenticated(false);
+          setIsProfileComplete(false);
+          setAuthLoading(false);
+          setProfileLoading(false);
+          return;
+        }
+
+        setIsAuthenticated(true);
         setAuthLoading(false);
-        if (signedIn) {
-          setAuthGateReason(null);
+        setAuthGateReason(null);
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, phone")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!active || seq !== verifySeq) return;
+        const ready = checkProfileComplete(profile);
+        setIsProfileComplete(ready);
+        setProfileLoading(false);
+        if (ready) {
+          setProfileSetupOpen(false);
+          setProfileSetupReason(null);
+          setProfileSetupNextPath(null);
+          setProfileSetupRequired(false);
         }
       } catch {
         if (!active || seq !== verifySeq) return;
         setIsAuthenticated(false);
+        setIsProfileComplete(false);
         setAuthLoading(false);
+        setProfileLoading(false);
       }
     }
 
-    void verifyAuthUser();
+    void verifyAuthAndProfile();
 
     const {
       data: { subscription },
@@ -150,8 +203,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         verifySeq += 1;
         pendingAddRef.current = null;
         setIsAuthenticated(false);
+        setIsProfileComplete(false);
         setAuthLoading(false);
+        setProfileLoading(false);
         setAuthGateReason(null);
+        setProfileSetupOpen(false);
+        setProfileSetupReason(null);
+        setProfileSetupNextPath(null);
+        setProfileSetupRequired(false);
         setIsDrawerOpen(false);
         setLastAddedProductId(null);
         return;
@@ -160,7 +219,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       // Defer getUser() out of onAuthStateChange callback to avoid auth lock contention.
       window.setTimeout(() => {
         if (active) {
-          void verifyAuthUser();
+          void verifyAuthAndProfile();
         }
       }, 0);
     });
@@ -185,9 +244,43 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const closeAuthGate = useCallback(() => {
-    pendingAddRef.current = null;
+  const closeAuthGate = useCallback((preservePending = false) => {
+    if (!preservePending) {
+      pendingAddRef.current = null;
+    }
     setAuthGateReason(null);
+  }, []);
+
+  const openProfileSetup = useCallback(
+    (
+      reason: Exclude<ProfileSetupReason, null>,
+      options?: { nextPath?: string | null; required?: boolean }
+    ) => {
+      setProfileSetupReason(reason);
+      setProfileSetupNextPath(
+        options?.nextPath ? sanitizeNextPath(options.nextPath, "/") : null
+      );
+      setProfileSetupRequired(Boolean(options?.required));
+      setProfileSetupOpen(true);
+    },
+    []
+  );
+
+  const closeProfileSetup = useCallback(() => {
+    pendingAddRef.current = null;
+    setProfileSetupOpen(false);
+    setProfileSetupReason(null);
+    setProfileSetupNextPath(null);
+    setProfileSetupRequired(false);
+  }, []);
+
+  const markProfileCompleted = useCallback(() => {
+    setIsProfileComplete(true);
+    setProfileLoading(false);
+    setProfileSetupOpen(false);
+    setProfileSetupReason(null);
+    setProfileSetupNextPath(null);
+    setProfileSetupRequired(false);
   }, []);
 
   const commitPendingItem = useCallback(() => {
@@ -203,24 +296,47 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     (incoming: Omit<CartItem, "quantity">, qty = 1) => {
       const safeQty = Math.max(1, Math.round(qty));
 
-      if (authLoading) {
+      if (authLoading || (isAuthenticated && profileLoading)) {
         const supabase = createClient();
-        void supabase.auth.getUser().then(({ data: { user } }) => {
-          if (user) {
-            setIsAuthenticated(true);
-            setAuthLoading(false);
-            appendCartItem(incoming, safeQty);
-            setLastAddedProductId(incoming.productId);
-            setIsDrawerOpen(true);
-          } else {
+        void supabase.auth.getUser().then(async ({ data: { user } }) => {
+          if (!user) {
             setIsAuthenticated(false);
+            setIsProfileComplete(false);
             setAuthLoading(false);
+            setProfileLoading(false);
             pendingAddRef.current = { item: incoming, quantity: safeQty };
             setAuthGateNextPath(
               sanitizeNextPath(`/products/${incoming.slug}`, "/")
             );
             setAuthGateReason("cart");
+            return;
           }
+
+          setIsAuthenticated(true);
+          setAuthLoading(false);
+
+          const { data: profile } = await supabase
+            .from("profiles")
+            .select("full_name, phone")
+            .eq("id", user.id)
+            .maybeSingle();
+
+          const ready = checkProfileComplete(profile);
+          setIsProfileComplete(ready);
+          setProfileLoading(false);
+
+          if (!ready) {
+            pendingAddRef.current = { item: incoming, quantity: safeQty };
+            setProfileSetupReason("cart");
+            setProfileSetupNextPath(null);
+            setProfileSetupRequired(false);
+            setProfileSetupOpen(true);
+            return;
+          }
+
+          appendCartItem(incoming, safeQty);
+          setLastAddedProductId(incoming.productId);
+          setIsDrawerOpen(true);
         });
         return false;
       }
@@ -234,11 +350,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         return false;
       }
 
+      if (!isProfileComplete) {
+        pendingAddRef.current = { item: incoming, quantity: safeQty };
+        setProfileSetupReason("cart");
+        setProfileSetupNextPath(null);
+        setProfileSetupRequired(false);
+        setProfileSetupOpen(true);
+        return false;
+      }
+
       appendCartItem(incoming, safeQty);
       setLastAddedProductId(incoming.productId);
       return true;
     },
-    [authLoading, isAuthenticated, appendCartItem]
+    [
+      authLoading,
+      isAuthenticated,
+      profileLoading,
+      isProfileComplete,
+      appendCartItem,
+    ]
   );
 
   const updateQuantity = useCallback((productId: string, quantity: number) => {
@@ -278,8 +409,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       lastAddedProductId,
       isAuthenticated,
       authLoading,
+      isProfileComplete,
+      profileLoading,
       authGateReason,
       authGateNextPath,
+      profileSetupOpen,
+      profileSetupReason,
+      profileSetupNextPath,
+      profileSetupRequired,
       totalCount,
       subtotalKes,
       hasBulkyItem,
@@ -287,6 +424,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       closeDrawer,
       openAuthGate,
       closeAuthGate,
+      openProfileSetup,
+      closeProfileSetup,
+      markProfileCompleted,
       addItem,
       commitPendingItem,
       updateQuantity,
@@ -299,8 +439,14 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       lastAddedProductId,
       isAuthenticated,
       authLoading,
+      isProfileComplete,
+      profileLoading,
       authGateReason,
       authGateNextPath,
+      profileSetupOpen,
+      profileSetupReason,
+      profileSetupNextPath,
+      profileSetupRequired,
       totalCount,
       subtotalKes,
       hasBulkyItem,
@@ -308,6 +454,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       closeDrawer,
       openAuthGate,
       closeAuthGate,
+      openProfileSetup,
+      closeProfileSetup,
+      markProfileCompleted,
       addItem,
       commitPendingItem,
       updateQuantity,

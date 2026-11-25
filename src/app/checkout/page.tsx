@@ -11,7 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { isGoogleUser } from "@/lib/auth/profile";
+import { isProfileComplete as checkProfileComplete } from "@/lib/auth/profile";
 import { useCart } from "@/components/storefront/CartContext";
 import type { StorefrontDeliveryZone } from "@/lib/db/storefront";
 
@@ -33,9 +33,17 @@ type CreatedOrderSummary = {
 
 export default function CheckoutPage() {
   const router = useRouter();
-  const { items, subtotalKes, hasBulkyItem, clearCart } = useCart();
+  const {
+    items,
+    subtotalKes,
+    hasBulkyItem,
+    clearCart,
+    isProfileComplete,
+    openProfileSetup,
+  } = useCart();
 
   const [authChecked, setAuthChecked] = useState(false);
+  const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const activeUserIdRef = useRef<string | null>(null);
 
@@ -105,13 +113,16 @@ export default function CheckoutPage() {
 
       if (!active || activeUserIdRef.current !== user.id) return false;
 
-      if (
-        isGoogleUser(user as Parameters<typeof isGoogleUser>[0]) &&
-        !profile?.phone?.trim()
-      ) {
-        router.replace("/signup?mode=complete&next=%2Fcheckout");
+      if (!checkProfileComplete(profile)) {
+        setNeedsProfileSetup(true);
+        openProfileSetup("checkout", {
+          nextPath: "/checkout",
+          required: true,
+        });
         return false;
       }
+
+      setNeedsProfileSetup(false);
 
       const metaFullName =
         typeof user.user_metadata?.full_name === "string"
@@ -148,7 +159,10 @@ export default function CheckoutPage() {
         if (!active) return;
         const canContinue = await loadUserProfile(user);
         if (!canContinue || !active) {
-          redirected = true;
+          if (active) {
+            setAuthChecked(true);
+            setLoadingZones(false);
+          }
           return;
         }
 
@@ -230,7 +244,7 @@ export default function CheckoutPage() {
       active = false;
       subscription.unsubscribe();
     };
-  }, [router]);
+  }, [router, isProfileComplete, openProfileSetup]);
 
   const selectedZone = useMemo(
     () => zones.find((z) => z.id === selectedZoneId) ?? null,
@@ -356,6 +370,28 @@ export default function CheckoutPage() {
         {!authChecked ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500 max-w-md mx-auto">
             Checking account session...
+          </div>
+        ) : needsProfileSetup ? (
+          <div className="bg-white border border-neutral-200 rounded-2xl p-8 text-center max-w-md mx-auto space-y-4">
+            <h1 className="text-lg font-semibold text-neutral-950">
+              Complete your profile to checkout
+            </h1>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              Add your full name and phone number so our riders and shop staff
+              can coordinate delivery and send your 4-digit handover PIN.
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                openProfileSetup("checkout", {
+                  nextPath: "/checkout",
+                  required: true,
+                })
+              }
+              className="px-5 py-2.5 rounded-xl bg-[#C81E2B] hover:bg-[#A61621] text-white text-xs font-semibold tracking-wide transition-colors cursor-pointer"
+            >
+              Complete Profile
+            </button>
           </div>
         ) : createdOrder ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto space-y-5">

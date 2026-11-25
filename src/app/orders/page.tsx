@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { ArrowLeft, KeyRound, Truck, Package, Radio } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { buildAuthPath } from "@/lib/auth/redirects";
+import { isProfileComplete as checkProfileComplete } from "@/lib/auth/profile";
+import { useCart } from "@/components/storefront/CartContext";
 
 type CustomerOrderItem = {
   id: string;
@@ -37,7 +39,9 @@ function formatKes(amount: number) {
 
 export default function MyOrdersPage() {
   const router = useRouter();
+  const { isProfileComplete, openProfileSetup } = useCart();
   const [loading, setLoading] = useState(true);
+  const [needsProfileSetup, setNeedsProfileSetup] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [orders, setOrders] = useState<CustomerOrderRow[]>([]);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
@@ -135,6 +139,24 @@ export default function MyOrdersPage() {
 
       setUserId(user.id);
 
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!active || activeUserIdRef.current !== user.id) return;
+
+      if (!checkProfileComplete(profile)) {
+        setNeedsProfileSetup(true);
+        setOrders([]);
+        setLoading(false);
+        openProfileSetup("orders", { nextPath: "/orders", required: true });
+        return;
+      }
+
+      setNeedsProfileSetup(false);
+
       if (checkPaymentCallback) {
         const urlParams = new URLSearchParams(window.location.search);
         const ref = urlParams.get("reference") || urlParams.get("trxref");
@@ -178,7 +200,7 @@ export default function MyOrdersPage() {
       active = false;
       subscription.unsubscribe();
     };
-  }, [router, fetchOrdersForUser]);
+  }, [router, fetchOrdersForUser, isProfileComplete, openProfileSetup]);
 
   useEffect(() => {
     if (!userId) return;
@@ -276,6 +298,28 @@ export default function MyOrdersPage() {
         {loading ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-8 text-sm text-slate-500">
             Loading your orders...
+          </div>
+        ) : needsProfileSetup ? (
+          <div className="bg-white border border-neutral-200 rounded-2xl p-8 text-center max-w-md mx-auto space-y-4">
+            <h2 className="text-base font-semibold text-neutral-950">
+              Complete your profile to view orders
+            </h2>
+            <p className="text-xs text-neutral-600 leading-relaxed">
+              Save your full name and phone number to access your orders,
+              handover PINs, and warranty records.
+            </p>
+            <button
+              type="button"
+              onClick={() =>
+                openProfileSetup("orders", {
+                  nextPath: "/orders",
+                  required: true,
+                })
+              }
+              className="px-5 py-2.5 rounded-xl bg-[#C81E2B] hover:bg-[#A61621] text-white text-xs font-semibold tracking-wide transition-colors cursor-pointer"
+            >
+              Complete Profile
+            </button>
           </div>
         ) : orders.length === 0 ? (
           <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-3">

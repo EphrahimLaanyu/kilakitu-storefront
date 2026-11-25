@@ -84,10 +84,9 @@ export async function GET(request: Request) {
           isProfileComplete(existingProfile) || syncResult.isComplete;
 
         if (!profileReady) {
-          const completeUrl = new URL("/signup", redirectOrigin);
-          completeUrl.searchParams.set("mode", "complete");
-          completeUrl.searchParams.set("next", safeNext);
-          return NextResponse.redirect(completeUrl);
+          const setupRedirectUrl = new URL(safeNext, redirectOrigin);
+          setupRedirectUrl.searchParams.set("setup", "1");
+          return NextResponse.redirect(setupRedirectUrl);
         }
       }
     }

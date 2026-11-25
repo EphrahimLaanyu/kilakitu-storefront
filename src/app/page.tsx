@@ -202,8 +202,8 @@ export default async function StorefrontHomePage() {
           </section>
         )}
 
-        {/* Editorial Catalog & Store Footer */}
-        <footer className="pt-10 border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+        {/* Editorial Catalog CTA Strip */}
+        <section className="pt-10 border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
           <div className="space-y-1">
             <p className="text-sm font-semibold text-neutral-950">
               Looking for something specific?
@@ -222,15 +222,8 @@ export default async function StorefrontHomePage() {
               <span>View Full Catalog</span>
               <ArrowRight className="h-3.5 w-3.5" />
             </Link>
-            <Link
-              href="/policies"
-              prefetch={false}
-              className="font-medium text-neutral-500 hover:text-neutral-950 underline underline-offset-4 transition-colors"
-            >
-              Warranty &amp; Pickup
-            </Link>
           </div>
-        </footer>
+        </section>
       </div>
     </main>
   );

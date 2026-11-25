@@ -29,6 +29,7 @@ export function AccountGateModal() {
     authGateReason,
     authGateNextPath,
     closeAuthGate,
+    openProfileSetup,
     commitPendingItem,
     openDrawer,
   } = useCart();
@@ -122,16 +123,29 @@ export function AccountGateModal() {
       } = await supabase.auth.getUser();
       const activeUser = verifiedUser ?? data.user;
 
+      let profileReady = true;
       if (activeUser) {
-        await syncUserProfile(supabase, activeUser);
+        const syncResult = await syncUserProfile(supabase, activeUser);
+        profileReady = syncResult.isComplete;
       }
 
-      const addedPending = authGateReason === "cart" && commitPendingItem();
+      const gateReasonSnapshot = authGateReason;
 
       setEventOpen(false);
       setEmail("");
       setPassword("");
       setSubmitting(false);
+
+      if (!profileReady) {
+        closeAuthGate(true);
+        openProfileSetup(gateReasonSnapshot === "cart" ? "cart" : "checkout", {
+          nextPath: gateReasonSnapshot === "checkout" ? safeNext : null,
+        });
+        router.refresh();
+        return;
+      }
+
+      const addedPending = gateReasonSnapshot === "cart" && commitPendingItem();
       closeAuthGate();
       router.refresh();
 

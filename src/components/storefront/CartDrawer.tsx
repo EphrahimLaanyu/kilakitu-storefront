@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { X, Plus, Minus, Trash2, Check } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { isProfileComplete as checkProfileComplete } from "@/lib/auth/profile";
 import { useCart, type CartItem } from "./CartContext";
 
 function formatKes(amount: number) {
@@ -21,11 +22,14 @@ export function CartDrawer() {
     lastAddedProductId,
     isAuthenticated,
     authLoading,
+    isProfileComplete,
+    profileLoading,
     totalCount,
     subtotalKes,
     hasBulkyItem,
     closeDrawer,
     openAuthGate,
+    openProfileSetup,
     updateQuantity,
     removeItem,
   } = useCart();
@@ -66,6 +70,12 @@ export function CartDrawer() {
       return;
     }
 
+    if (!authLoading && isAuthenticated && !profileLoading && !isProfileComplete) {
+      closeDrawer();
+      openProfileSetup("checkout", { nextPath: "/checkout" });
+      return;
+    }
+
     setCheckingOut(true);
     try {
       const supabase = createClient();
@@ -76,6 +86,17 @@ export function CartDrawer() {
       closeDrawer();
       if (!user) {
         openAuthGate("checkout", "/checkout");
+        return;
+      }
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, phone")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!checkProfileComplete(profile)) {
+        openProfileSetup("checkout", { nextPath: "/checkout" });
         return;
       }
 

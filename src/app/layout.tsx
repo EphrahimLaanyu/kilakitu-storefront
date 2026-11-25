@@ -4,9 +4,15 @@ import "./globals.css";
 import { CartProvider } from "@/components/storefront/CartContext";
 import { CartDrawer } from "@/components/storefront/CartDrawer";
 import { AccountGateModal } from "@/components/storefront/AccountGateModal";
+import { ProfileSetupModal } from "@/components/storefront/ProfileSetupModal";
 import { StorefrontRealtimeListener } from "@/components/storefront/StorefrontRealtimeListener";
 import { StorefrontNavbar } from "@/components/storefront/StorefrontNavbar";
-import { getStorefrontCategories } from "@/lib/db/storefront";
+import { StorefrontFooter } from "@/components/storefront/StorefrontFooter";
+import {
+  getActiveStoreBySlug,
+  getStorefrontCategories,
+  type StorefrontStoreInfo,
+} from "@/lib/db/storefront";
 
 const jakarta = Plus_Jakarta_Sans({
   variable: "--font-sans",
@@ -40,25 +46,36 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const storeSlug =
+    process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
+
   let categories: { id: string; name: string; slug: string }[] = [];
+  let store: StorefrontStoreInfo | null = null;
   try {
-    const rows = await getStorefrontCategories();
+    const [rows, storeRow] = await Promise.all([
+      getStorefrontCategories(),
+      getActiveStoreBySlug(storeSlug),
+    ]);
     categories = rows.map((c) => ({ id: c.id, name: c.name, slug: c.slug }));
+    store = storeRow;
   } catch {
     categories = [];
+    store = null;
   }
 
   return (
     <html lang="en">
       <body
-        className={`${jakarta.variable} ${jetbrainsMono.variable} font-sans antialiased bg-[#F8FAFC] text-slate-900 overflow-x-hidden`}
+        className={`${jakarta.variable} ${jetbrainsMono.variable} font-sans antialiased bg-[#F8FAFC] text-slate-900 overflow-x-hidden min-h-screen flex flex-col`}
       >
         <CartProvider>
           <StorefrontRealtimeListener />
           <StorefrontNavbar categories={categories} />
-          {children}
+          <div className="flex-1">{children}</div>
+          <StorefrontFooter store={store} />
           <CartDrawer />
           <AccountGateModal />
+          <ProfileSetupModal />
         </CartProvider>
       </body>
     </html>
