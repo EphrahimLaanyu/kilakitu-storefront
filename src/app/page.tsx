@@ -1,83 +1,18 @@
 import Link from "next/link";
+import { ArrowRight } from "lucide-react";
 import {
   getActiveStoreBySlug,
-  getStorefrontCategories,
-  getStorefrontProducts,
+  getHomepageCuratedSections,
 } from "@/lib/db/storefront";
-import { CatalogAddToCartButton } from "@/components/storefront/CatalogAddToCartButton";
+import { ProductCard } from "@/components/storefront/ProductCard";
 
 export const revalidate = 30;
 
-function formatKes(amount: number) {
-  return `KES ${amount.toLocaleString("en-KE")}`;
-}
-
-function getStockMeta(status: string) {
-  switch (status) {
-    case "in_stock":
-      return {
-        label: "In stock",
-        dotClass: "bg-emerald-600",
-        textClass: "text-neutral-600",
-      };
-    case "low_stock":
-      return {
-        label: "Low stock",
-        dotClass: "bg-[#D4A024]",
-        textClass: "text-neutral-700",
-      };
-    case "confirm_availability":
-      return {
-        label: "Confirm stock",
-        dotClass: "bg-neutral-400",
-        textClass: "text-neutral-600",
-      };
-    default:
-      return {
-        label: "Out of stock",
-        dotClass: "bg-[#C81E2B]",
-        textClass: "text-neutral-400",
-      };
-  }
-}
-
-function getWarrantyText(
-  warrantyType: "manufacturer" | "shop" | "none",
-  warrantyMonths: number
-) {
-  if (warrantyType === "none" || warrantyMonths <= 0) return null;
-  const unit = warrantyMonths === 1 ? "month" : "months";
-  return warrantyType === "shop"
-    ? `${warrantyMonths}-${unit} shop warranty`
-    : `${warrantyMonths}-${unit} manufacturer warranty`;
-}
-
-export default async function StorefrontHomePage({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    q?: string;
-    search?: string;
-    category?: string;
-    brand?: string;
-    maxPrice?: string;
-    available?: string;
-  }>;
-}) {
-  const params = await searchParams;
-  const searchQuery = (params.q || params.search || "").trim();
-  const categorySlug = (params.category || "all").trim();
-  const brandFilter = (params.brand || "all").trim();
-  const maxPriceNum = params.maxPrice ? Number(params.maxPrice) : undefined;
-  const onlyAvailable = params.available === "1";
-
+export default async function StorefrontHomePage() {
   const storeSlug =
     process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
 
-  const [store, categories] = await Promise.all([
-    getActiveStoreBySlug(storeSlug),
-    getStorefrontCategories(),
-  ]);
+  const store = await getActiveStoreBySlug(storeSlug);
 
   if (!store) {
     return (
@@ -92,30 +27,12 @@ export default async function StorefrontHomePage({
     );
   }
 
-  const { products, brands } = await getStorefrontProducts(store.id, {
-    search: searchQuery || undefined,
-    categorySlug: categorySlug !== "all" ? categorySlug : undefined,
-    brand: brandFilter !== "all" ? brandFilter : undefined,
-    maxPriceKes:
-      typeof maxPriceNum === "number" &&
-      Number.isFinite(maxPriceNum) &&
-      maxPriceNum > 0
-        ? maxPriceNum
-        : undefined,
-    onlyAvailable,
-  });
-
-  const activeCategoryObj =
-    categorySlug !== "all"
-      ? categories.find((c) => c.slug === categorySlug)
-      : null;
-
-  const hasActiveFilters =
-    Boolean(searchQuery) ||
-    categorySlug !== "all" ||
-    brandFilter !== "all" ||
-    (typeof maxPriceNum === "number" && maxPriceNum > 0) ||
-    onlyAvailable;
+  const { featured, hottestDeals, newArrivals } =
+    await getHomepageCuratedSections(store.id, {
+      featured: 8,
+      deals: 8,
+      arrivals: 8,
+    });
 
   return (
     <main className="bg-white min-h-screen">
@@ -135,272 +52,185 @@ export default async function StorefrontHomePage({
         </div>
       </div>
 
-      {/* Main Catalog Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-8 pb-20 space-y-8">
-        {/* Editorial Page Header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-6 border-b border-neutral-200">
-          <div className="space-y-1">
+      {/* Curated Homepage Container */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-8 sm:pt-10 pb-20 space-y-14">
+        {/* Minimal Editorial Intro Header */}
+        <section className="pb-8 border-b border-neutral-200 flex flex-col sm:flex-row sm:items-end justify-between gap-5">
+          <div className="space-y-1.5 max-w-xl">
             <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#C81E2B]">
               {store.name}
             </p>
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950">
-              {searchQuery
-                ? `Search: “${searchQuery}”`
-                : activeCategoryObj
-                ? activeCategoryObj.name
-                : "All Electronics"}
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950 leading-tight">
+              Genuine tech, verified warranties, transparent pricing.
             </h1>
           </div>
 
-          <p className="text-xs text-neutral-500 tabular-nums">
-            Showing {products.length}{" "}
-            {products.length === 1 ? "product" : "products"}
-          </p>
-        </div>
-
-        {/* Clean Architectural Filter Bar */}
-        <form
-          method="GET"
-          action="/"
-          className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-12 gap-4 pb-6 border-b border-neutral-200 items-end"
-        >
-          {searchQuery && <input type="hidden" name="q" value={searchQuery} />}
-
-          <div className="col-span-1 lg:col-span-3 space-y-1.5">
-            <label
-              htmlFor="filter-category"
-              className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500"
+          <div className="flex flex-wrap items-center gap-4 text-xs shrink-0">
+            <Link
+              href="/catalog"
+              prefetch={false}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md bg-neutral-950 hover:bg-[#C81E2B] text-white font-semibold tracking-wide transition-colors"
             >
-              Category
-            </label>
-            <select
-              id="filter-category"
-              name="category"
-              defaultValue={categorySlug}
-              className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-xs sm:text-sm font-medium text-neutral-950 focus:outline-none transition-colors"
+              <span>Browse Full Catalog</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+            <Link
+              href="/catalog?deals=1&sort=deals"
+              prefetch={false}
+              className="font-semibold text-neutral-700 hover:text-[#C81E2B] underline underline-offset-4 transition-colors"
             >
-              <option value="all">All Categories</option>
-              {categories.map((cat) => (
-                <option key={cat.id} value={cat.slug}>
-                  {cat.name}
-                </option>
-              ))}
-            </select>
+              Shop Deals
+            </Link>
           </div>
+        </section>
 
-          <div className="col-span-1 lg:col-span-3 space-y-1.5">
-            <label
-              htmlFor="filter-brand"
-              className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500"
-            >
-              Brand
-            </label>
-            <select
-              id="filter-brand"
-              name="brand"
-              defaultValue={brandFilter}
-              className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-xs sm:text-sm font-medium text-neutral-950 focus:outline-none transition-colors"
-            >
-              <option value="all">All Brands</option>
-              {brands.map((brand) => (
-                <option key={brand} value={brand}>
-                  {brand}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="col-span-1 lg:col-span-2 space-y-1.5">
-            <label
-              htmlFor="filter-max-price"
-              className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500"
-            >
-              Max Budget (KES)
-            </label>
-            <input
-              id="filter-max-price"
-              type="number"
-              name="maxPrice"
-              min={0}
-              step={500}
-              defaultValue={maxPriceNum && maxPriceNum > 0 ? maxPriceNum : ""}
-              placeholder="No limit"
-              className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-xs sm:text-sm font-medium text-neutral-950 placeholder:text-neutral-400 focus:outline-none transition-colors tabular-nums"
-            />
-          </div>
-
-          <div className="col-span-1 lg:col-span-2 flex items-center h-9">
-            <label className="inline-flex items-center gap-2 text-xs font-medium text-neutral-700 cursor-pointer select-none">
-              <input
-                type="checkbox"
-                name="available"
-                value="1"
-                defaultChecked={onlyAvailable}
-                className="h-3.5 w-3.5 rounded-none border-neutral-400 text-neutral-950 focus:ring-0"
-              />
-              <span>In stock only</span>
-            </label>
-          </div>
-
-          <div className="col-span-2 sm:col-span-4 lg:col-span-2 flex items-center gap-3">
-            <button
-              type="submit"
-              className="flex-1 py-2.5 px-4 rounded-md bg-neutral-950 hover:bg-[#C81E2B] text-white text-xs font-semibold tracking-wide transition-colors cursor-pointer"
-            >
-              Apply
-            </button>
-            {hasActiveFilters && (
-              <Link
-                href="/"
-                className="py-2.5 px-2 text-xs font-medium text-neutral-500 hover:text-neutral-950 underline underline-offset-4 transition-colors"
-              >
-                Reset
-              </Link>
-            )}
-          </div>
-        </form>
-
-        {/* Product Grid */}
-        {products.length === 0 ? (
-          <div className="py-16 text-center space-y-3 border-b border-neutral-200">
-            <h2 className="text-base font-semibold text-neutral-950">
-              No matching products
-            </h2>
-            <p className="text-xs sm:text-sm text-neutral-500 max-w-md mx-auto">
-              Adjust your search terms or clear active filters to view the full
-              catalog.
-            </p>
-            {hasActiveFilters && (
-              <div className="pt-2">
-                <Link
-                  href="/"
-                  className="inline-block px-5 py-2.5 rounded-md bg-neutral-950 text-white text-xs font-semibold"
+        {/* Section 1: Featured */}
+        {featured.length > 0 && (
+          <section aria-labelledby="section-featured" className="space-y-6">
+            <div className="flex items-end justify-between gap-4 pb-4 border-b border-neutral-200">
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#D4A024]">
+                  Curated Picks
+                </p>
+                <h2
+                  id="section-featured"
+                  className="text-lg sm:text-xl font-semibold tracking-tight text-neutral-950"
                 >
-                  Clear All Filters
-                </Link>
+                  Featured
+                </h2>
               </div>
-            )}
-          </div>
-        ) : (
-          <section
-            aria-label="Products"
-            className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 sm:gap-x-7 sm:gap-y-12"
-          >
-            {products.map((product, index) => {
-              const stock = getStockMeta(product.stock_status);
-              const warranty = getWarrantyText(
-                product.warranty_type,
-                product.warranty_months
-              );
-              const hasDiscount =
-                typeof product.compare_at_price_kes === "number" &&
-                product.compare_at_price_kes > product.price_kes;
-              const discountPct = hasDiscount
-                ? Math.round(
-                    ((product.compare_at_price_kes! - product.price_kes) /
-                      product.compare_at_price_kes!) *
-                      100
-                  )
-                : 0;
+              <Link
+                href="/catalog?featured=1&sort=featured"
+                prefetch={false}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-700 hover:text-[#C81E2B] transition-colors shrink-0"
+              >
+                <span>View all</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
 
-              const isOutOfStock = product.stock_status === "out_of_stock";
-
-              return (
-                <article
+            <div className="flex gap-4 sm:gap-6 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+              {featured.map((product, index) => (
+                <div
                   key={product.id}
-                  className="group flex flex-col justify-between"
+                  className="w-[220px] sm:w-[248px] lg:w-[272px] shrink-0 snap-start"
                 >
-                  <Link
-                    href={`/products/${product.slug}`}
-                    prefetch={false}
-                    className="block flex-1"
-                  >
-                    {/* Clean Studio Product Canvas */}
-                    <div className="relative aspect-square bg-[#F7F7F7] border border-neutral-200/70 group-hover:border-neutral-400 transition-colors overflow-hidden flex items-center justify-center p-4 sm:p-6">
-                      {product.primary_image_url ? (
-                        <img
-                          src={product.primary_image_url}
-                          alt={product.primary_image_alt || product.name}
-                          loading={index < 4 ? "eager" : "lazy"}
-                          decoding="async"
-                          className="w-full h-full object-contain group-hover:scale-[1.03] transition-transform duration-300"
-                        />
-                      ) : (
-                        <span className="text-xs text-neutral-400">
-                          Image unavailable
-                        </span>
-                      )}
-
-                      {/* Unboxed Top-Left Editorial Label (Plain Text Only) */}
-                      {hasDiscount && discountPct > 0 ? (
-                        <span className="absolute top-3 left-3 text-[11px] font-semibold tracking-wide text-[#C81E2B] tabular-nums">
-                          -{discountPct}%
-                        </span>
-                      ) : product.is_featured ? (
-                        <span className="absolute top-3 left-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-neutral-900">
-                          Featured
-                        </span>
-                      ) : null}
-                    </div>
-
-                    {/* Typographic Product Details */}
-                    <div className="pt-3.5 space-y-1">
-                      <div className="flex items-center justify-between gap-2 text-[11px]">
-                        <span className="font-semibold uppercase tracking-[0.08em] text-neutral-500 truncate">
-                          {product.brand}
-                        </span>
-                        <span
-                          className={`inline-flex items-center gap-1.5 font-medium shrink-0 ${stock.textClass}`}
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${stock.dotClass}`}
-                          />
-                          <span>{stock.label}</span>
-                        </span>
-                      </div>
-
-                      <h2 className="text-sm sm:text-[15px] font-medium text-neutral-950 group-hover:text-[#C81E2B] transition-colors line-clamp-2 leading-snug">
-                        {product.name}
-                      </h2>
-
-                      {warranty && (
-                        <p className="text-xs text-neutral-500 pt-0.5">
-                          {warranty}
-                        </p>
-                      )}
-                    </div>
-                  </Link>
-
-                  {/* Clean Hairline Price Footer + Direct Add to Cart */}
-                  <div className="mt-3 pt-2.5 border-t border-neutral-100">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-sm sm:text-base font-semibold text-neutral-950 tabular-nums">
-                        {formatKes(product.price_kes)}
-                      </span>
-                      {hasDiscount && (
-                        <span className="text-xs text-neutral-400 line-through tabular-nums">
-                          {formatKes(product.compare_at_price_kes!)}
-                        </span>
-                      )}
-                    </div>
-
-                    <CatalogAddToCartButton
-                      productId={product.id}
-                      slug={product.slug}
-                      name={product.name}
-                      brand={product.brand}
-                      priceKes={product.price_kes}
-                      imageUrl={product.primary_image_url}
-                      warrantyText={warranty || "No warranty stated"}
-                      isBulky={product.is_bulky}
-                      disabled={isOutOfStock}
-                    />
-                  </div>
-                </article>
-              );
-            })}
+                  <ProductCard product={product} eager={index < 4} />
+                </div>
+              ))}
+            </div>
           </section>
         )}
+
+        {/* Section 2: Hottest Deals */}
+        {hottestDeals.length > 0 && (
+          <section aria-labelledby="section-deals" className="space-y-6">
+            <div className="flex items-end justify-between gap-4 pb-4 border-b border-neutral-200">
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[#C81E2B]">
+                  Biggest Price Drops
+                </p>
+                <h2
+                  id="section-deals"
+                  className="text-lg sm:text-xl font-semibold tracking-tight text-neutral-950"
+                >
+                  Hottest Deals
+                </h2>
+              </div>
+              <Link
+                href="/catalog?deals=1&sort=deals"
+                prefetch={false}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-700 hover:text-[#C81E2B] transition-colors shrink-0"
+              >
+                <span>View all</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            <div className="flex gap-4 sm:gap-6 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+              {hottestDeals.map((product, index) => (
+                <div
+                  key={product.id}
+                  className="w-[220px] sm:w-[248px] lg:w-[272px] shrink-0 snap-start"
+                >
+                  <ProductCard
+                    product={product}
+                    variant="deal"
+                    eager={featured.length === 0 && index < 4}
+                  />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Section 3: New Arrivals */}
+        {newArrivals.length > 0 && (
+          <section aria-labelledby="section-arrivals" className="space-y-6">
+            <div className="flex items-end justify-between gap-4 pb-4 border-b border-neutral-200">
+              <div className="space-y-0.5">
+                <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-neutral-500">
+                  Just Landed
+                </p>
+                <h2
+                  id="section-arrivals"
+                  className="text-lg sm:text-xl font-semibold tracking-tight text-neutral-950"
+                >
+                  New Arrivals
+                </h2>
+              </div>
+              <Link
+                href="/catalog?sort=newest"
+                prefetch={false}
+                className="inline-flex items-center gap-1 text-xs font-semibold text-neutral-700 hover:text-[#C81E2B] transition-colors shrink-0"
+              >
+                <span>View all</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            </div>
+
+            <div className="flex gap-4 sm:gap-6 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-2 -mx-4 px-4 sm:mx-0 sm:px-0">
+              {newArrivals.map((product) => (
+                <div
+                  key={product.id}
+                  className="w-[220px] sm:w-[248px] lg:w-[272px] shrink-0 snap-start"
+                >
+                  <ProductCard product={product} />
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Editorial Catalog & Store Footer */}
+        <footer className="pt-10 border-t border-neutral-200 flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+          <div className="space-y-1">
+            <p className="text-sm font-semibold text-neutral-950">
+              Looking for something specific?
+            </p>
+            <p className="text-xs text-neutral-500">
+              Filter by brand, category, budget, or availability in our full
+              catalog.
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-4 text-xs shrink-0">
+            <Link
+              href="/catalog"
+              prefetch={false}
+              className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md border border-neutral-300 hover:border-neutral-950 text-neutral-950 font-semibold transition-colors"
+            >
+              <span>View Full Catalog</span>
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+            <Link
+              href="/policies"
+              prefetch={false}
+              className="font-medium text-neutral-500 hover:text-neutral-950 underline underline-offset-4 transition-colors"
+            >
+              Warranty &amp; Pickup
+            </Link>
+          </div>
+        </footer>
       </div>
     </main>
   );

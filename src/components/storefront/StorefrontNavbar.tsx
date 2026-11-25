@@ -214,27 +214,29 @@ function StorefrontNavbarInner({
     setSearchFocused(false);
     const trimmed = query.trim();
     const params = new URLSearchParams(
-      pathname === "/" ? searchParams.toString() : ""
+      pathname === "/catalog" ? searchParams.toString() : ""
     );
     params.delete("search");
+    params.delete("page");
     if (trimmed) {
       params.set("q", trimmed);
     } else {
       params.delete("q");
     }
     const qs = params.toString();
-    router.push(qs ? `/?${qs}` : "/");
+    router.push(qs ? `/catalog?${qs}` : "/catalog");
   }
 
   function clearSearch() {
     setQuery("");
     setSuggestions({ products: [], categories: [] });
-    if (pathname === "/") {
+    if (pathname === "/catalog") {
       const params = new URLSearchParams(searchParams.toString());
       params.delete("q");
       params.delete("search");
+      params.delete("page");
       const qs = params.toString();
-      router.push(qs ? `/?${qs}` : "/");
+      router.push(qs ? `/catalog?${qs}` : "/catalog");
     }
   }
 
@@ -357,7 +359,7 @@ function StorefrontNavbarInner({
                         {suggestions.categories.map((cat) => (
                           <Link
                             key={cat.id}
-                            href={`/?category=${encodeURIComponent(cat.slug)}`}
+                            href={`/catalog?category=${encodeURIComponent(cat.slug)}`}
                             prefetch={false}
                             onClick={() => setSearchFocused(false)}
                             className="flex items-center justify-between px-4 py-2 hover:bg-neutral-50 text-xs font-medium text-neutral-900"
@@ -410,7 +412,8 @@ function StorefrontNavbarInner({
                     )}
 
                     <Link
-                      href={`/?q=${encodeURIComponent(query.trim())}`}
+                      href={`/catalog?q=${encodeURIComponent(query.trim())}`}
+                      prefetch={false}
                       onClick={() => setSearchFocused(false)}
                       className="block w-full px-4 py-2.5 text-center text-xs font-semibold text-[#C81E2B] hover:bg-neutral-50 transition"
                     >
@@ -601,7 +604,21 @@ function StorefrontNavbarInner({
               href="/"
               prefetch={false}
               className={`py-3 border-b-2 transition-colors shrink-0 ${
-                pathname === "/" && activeCategory === "all"
+                pathname === "/"
+                  ? "border-[#C81E2B] text-neutral-950 font-semibold"
+                  : "border-transparent text-neutral-500 hover:text-neutral-950 font-medium"
+              }`}
+            >
+              Home
+            </Link>
+
+            <Link
+              href="/catalog"
+              prefetch={false}
+              className={`py-3 border-b-2 transition-colors shrink-0 ${
+                pathname === "/catalog" &&
+                activeCategory === "all" &&
+                searchParams.get("deals") !== "1"
                   ? "border-[#C81E2B] text-neutral-950 font-semibold"
                   : "border-transparent text-neutral-500 hover:text-neutral-950 font-medium"
               }`}
@@ -609,12 +626,25 @@ function StorefrontNavbarInner({
               All Products
             </Link>
 
+            <Link
+              href="/catalog?deals=1&sort=deals"
+              prefetch={false}
+              className={`py-3 border-b-2 transition-colors shrink-0 ${
+                pathname === "/catalog" && searchParams.get("deals") === "1"
+                  ? "border-[#C81E2B] text-neutral-950 font-semibold"
+                  : "border-transparent text-[#C81E2B] hover:text-neutral-950 font-medium"
+              }`}
+            >
+              Deals
+            </Link>
+
             {categories.map((cat) => {
-              const isSelected = pathname === "/" && activeCategory === cat.slug;
+              const isSelected =
+                pathname === "/catalog" && activeCategory === cat.slug;
               return (
                 <Link
                   key={cat.id}
-                  href={`/?category=${encodeURIComponent(cat.slug)}`}
+                  href={`/catalog?category=${encodeURIComponent(cat.slug)}`}
                   prefetch={false}
                   className={`py-3 border-b-2 transition-colors shrink-0 ${
                     isSelected

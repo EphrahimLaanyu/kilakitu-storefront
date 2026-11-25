@@ -15,6 +15,46 @@ function createPublicClient() {
   );
 }
 
+const PRODUCT_CARD_COLUMNS = `
+  id,
+  store_id,
+  category_id,
+  name,
+  slug,
+  brand,
+  model_number,
+  price_kes,
+  compare_at_price_kes,
+  short_description,
+  warranty_type,
+  warranty_months,
+  stock_status,
+  stock_quantity,
+  is_bulky,
+  is_featured,
+  created_at
+`;
+
+type RawProductCardRow = {
+  id: string;
+  store_id: string;
+  category_id: string | null;
+  name: string;
+  slug: string;
+  brand: string;
+  model_number: string | null;
+  price_kes: number;
+  compare_at_price_kes: number | null;
+  short_description: string | null;
+  warranty_type: string;
+  warranty_months: number;
+  stock_status: string;
+  stock_quantity: number;
+  is_bulky: boolean;
+  is_featured: boolean;
+  created_at?: string;
+};
+
 export type StorefrontCategory = {
   id: string;
   name: string;
@@ -100,13 +140,124 @@ export type StorefrontPolicy = {
   content_markdown: string;
 };
 
+export type StorefrontCatalogSort =
+  | "featured"
+  | "deals"
+  | "newest"
+  | "price_asc"
+  | "price_desc";
+
 export type StorefrontCatalogFilter = {
   search?: string;
   categorySlug?: string;
   brand?: string;
   maxPriceKes?: number;
   onlyAvailable?: boolean;
+  onlyFeatured?: boolean;
+  onlyDeals?: boolean;
+  sort?: StorefrontCatalogSort;
+  page?: number;
+  pageSize?: number;
 };
+
+export type PaginatedStorefrontCatalog = {
+  products: StorefrontProductCard[];
+  brands: string[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+};
+
+function compareByHottestDeal(a: RawProductCardRow, b: RawProductCardRow): number {
+  const aCompare = a.compare_at_price_kes ?? 0;
+  const bCompare = b.compare_at_price_kes ?? 0;
+  const aSavings = Math.max(0, aCompare - a.price_kes);
+  const bSavings = Math.max(0, bCompare - b.price_kes);
+  const aPct = aCompare > 0 ? aSavings / aCompare : 0;
+  const bPct = bCompare > 0 ? bSavings / bCompare : 0;
+
+  if (Math.abs(bPct - aPct) > 1e-9) {
+    return bPct - aPct;
+  }
+  if (bSavings !== aSavings) {
+    return bSavings - aSavings;
+  }
+  return (b.created_at ?? "").localeCompare(a.created_at ?? "");
+}
+
+function hasValidDiscount(row: RawProductCardRow): boolean {
+  return (
+    typeof row.compare_at_price_kes === "number" &&
+    row.compare_at_price_kes > row.price_kes
+  );
+}
+
+async function fetchPrimaryImageMap(
+  productIds: string[]
+): Promise<Map<string, { public_url: string; alt_text: string | null }>> {
+  const imageMap = new Map<
+    string,
+    { public_url: string; alt_text: string | null }
+  >();
+  if (productIds.length === 0) return imageMap;
+
+  const supabase = createPublicClient();
+  const { data: images } = await supabase
+    .from("product_images")
+    .select("product_id, public_url, alt_text, sort_order")
+    .in("product_id", productIds)
+    .eq("is_primary", true)
+    .order("sort_order", { ascending: true });
+
+  for (const img of images ?? []) {
+    if (!imageMap.has(img.product_id)) {
+      imageMap.set(img.product_id, {
+        public_url: img.public_url,
+        alt_text: img.alt_text,
+      });
+    }
+  }
+
+  return imageMap;
+}
+
+function mapProductCards(
+  rows: RawProductCardRow[],
+  categoryById: Map<string, StorefrontCategory>,
+  imageMap: Map<string, { public_url: string; alt_text: string | null }>
+): StorefrontProductCard[] {
+  return rows.map((p) => {
+    const cat = p.category_id ? categoryById.get(p.category_id) : undefined;
+    const primaryImg = imageMap.get(p.id);
+    return {
+      id: p.id,
+      store_id: p.store_id,
+      category_id: p.category_id,
+      name: p.name,
+      slug: p.slug,
+      brand: p.brand,
+      model_number: p.model_number,
+      price_kes: p.price_kes,
+      compare_at_price_kes: p.compare_at_price_kes,
+      short_description: p.short_description,
+      warranty_type: p.warranty_type as "manufacturer" | "shop" | "none",
+      warranty_months: p.warranty_months,
+      stock_status: p.stock_status as
+        | "in_stock"
+        | "low_stock"
+        | "confirm_availability"
+        | "out_of_stock",
+      stock_quantity: p.stock_quantity,
+      is_bulky: p.is_bulky,
+      is_featured: p.is_featured,
+      primary_image_url: primaryImg?.public_url ?? null,
+      primary_image_alt: primaryImg?.alt_text ?? p.name,
+      category_name: cat?.name ?? null,
+      category_slug: cat?.slug ?? null,
+    };
+  });
+}
 
 export const getActiveStoreBySlug = cache(
   async (slug: string): Promise<StorefrontStoreInfo | null> => {
@@ -146,17 +297,210 @@ export const getStorefrontCategories = cache(
   }
 );
 
-export async function getStorefrontProducts(
+export const getStorefrontBrands = cache(
+  async (storeId: string): Promise<string[]> => {
+    const supabase = createPublicClient();
+    const { data } = await supabase
+      .from("products")
+      .select("brand")
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .is("deleted_at", null);
+
+    const brandSet = new Set<string>();
+    for (const row of data ?? []) {
+      if (row.brand?.trim()) {
+        brandSet.add(row.brand.trim());
+      }
+    }
+    return Array.from(brandSet).sort((a, b) => a.localeCompare(b));
+  }
+);
+
+export async function getFeaturedStorefrontProducts(
   storeId: string,
-  filters: StorefrontCatalogFilter = {}
+  limit = 4
+): Promise<StorefrontProductCard[]> {
+  const supabase = createPublicClient();
+  const [categories, { data, error }] = await Promise.all([
+    getStorefrontCategories(),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .eq("is_featured", true)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
+
+  if (error) {
+    throw new Error(`Failed to load featured products: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as RawProductCardRow[];
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const imageMap = await fetchPrimaryImageMap(rows.map((r) => r.id));
+  return mapProductCards(rows, categoryById, imageMap);
+}
+
+export async function getHottestDealsProducts(
+  storeId: string,
+  limit = 4
+): Promise<StorefrontProductCard[]> {
+  const supabase = createPublicClient();
+  const [categories, { data, error }] = await Promise.all([
+    getStorefrontCategories(),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .is("deleted_at", null)
+      .not("compare_at_price_kes", "is", null),
+  ]);
+
+  if (error) {
+    throw new Error(`Failed to load hottest deals: ${error.message}`);
+  }
+
+  const dealRows = ((data ?? []) as RawProductCardRow[])
+    .filter(hasValidDiscount)
+    .sort(compareByHottestDeal)
+    .slice(0, limit);
+
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const imageMap = await fetchPrimaryImageMap(dealRows.map((r) => r.id));
+  return mapProductCards(dealRows, categoryById, imageMap);
+}
+
+export async function getNewArrivalsProducts(
+  storeId: string,
+  limit = 8
+): Promise<StorefrontProductCard[]> {
+  const supabase = createPublicClient();
+  const [categories, { data, error }] = await Promise.all([
+    getStorefrontCategories(),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(limit),
+  ]);
+
+  if (error) {
+    throw new Error(`Failed to load new arrivals: ${error.message}`);
+  }
+
+  const rows = (data ?? []) as RawProductCardRow[];
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const imageMap = await fetchPrimaryImageMap(rows.map((r) => r.id));
+  return mapProductCards(rows, categoryById, imageMap);
+}
+
+/**
+ * Fetches all three curated homepage sections in parallel with a single
+ * batched primary-image lookup across all unique displayed product IDs.
+ */
+export async function getHomepageCuratedSections(
+  storeId: string,
+  limits: { featured?: number; deals?: number; arrivals?: number } = {}
 ): Promise<{
-  products: StorefrontProductCard[];
-  brands: string[];
+  featured: StorefrontProductCard[];
+  hottestDeals: StorefrontProductCard[];
+  newArrivals: StorefrontProductCard[];
 }> {
+  const featuredLimit = limits.featured ?? 4;
+  const dealsLimit = limits.deals ?? 4;
+  const arrivalsLimit = limits.arrivals ?? 8;
+
   const supabase = createPublicClient();
 
-  // Deduplicated via React cache() with RootLayout and HomePage.
-  const categories = await getStorefrontCategories();
+  const [categories, featuredRes, dealsRes, arrivalsRes] = await Promise.all([
+    getStorefrontCategories(),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .eq("is_featured", true)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(featuredLimit),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .is("deleted_at", null)
+      .not("compare_at_price_kes", "is", null),
+    supabase
+      .from("products")
+      .select(PRODUCT_CARD_COLUMNS)
+      .eq("store_id", storeId)
+      .eq("is_published", true)
+      .is("deleted_at", null)
+      .order("created_at", { ascending: false })
+      .limit(arrivalsLimit),
+  ]);
+
+  if (featuredRes.error) {
+    throw new Error(
+      `Failed to load featured products: ${featuredRes.error.message}`
+    );
+  }
+  if (dealsRes.error) {
+    throw new Error(`Failed to load hottest deals: ${dealsRes.error.message}`);
+  }
+  if (arrivalsRes.error) {
+    throw new Error(
+      `Failed to load new arrivals: ${arrivalsRes.error.message}`
+    );
+  }
+
+  const featuredRows = (featuredRes.data ?? []) as RawProductCardRow[];
+  const dealRows = ((dealsRes.data ?? []) as RawProductCardRow[])
+    .filter(hasValidDiscount)
+    .sort(compareByHottestDeal)
+    .slice(0, dealsLimit);
+  const arrivalRows = (arrivalsRes.data ?? []) as RawProductCardRow[];
+
+  const uniqueIds = Array.from(
+    new Set([
+      ...featuredRows.map((r) => r.id),
+      ...dealRows.map((r) => r.id),
+      ...arrivalRows.map((r) => r.id),
+    ])
+  );
+
+  const categoryById = new Map(categories.map((c) => [c.id, c]));
+  const imageMap = await fetchPrimaryImageMap(uniqueIds);
+
+  return {
+    featured: mapProductCards(featuredRows, categoryById, imageMap),
+    hottestDeals: mapProductCards(dealRows, categoryById, imageMap),
+    newArrivals: mapProductCards(arrivalRows, categoryById, imageMap),
+  };
+}
+
+export async function getPaginatedStorefrontCatalog(
+  storeId: string,
+  filters: StorefrontCatalogFilter = {}
+): Promise<PaginatedStorefrontCatalog> {
+  const supabase = createPublicClient();
+  const pageSize = Math.max(1, Math.min(48, Math.round(filters.pageSize ?? 16)));
+  const requestedPage = Math.max(1, Math.round(filters.page ?? 1));
+  const sort: StorefrontCatalogSort = filters.sort ?? "featured";
+
+  const [categories, brands] = await Promise.all([
+    getStorefrontCategories(),
+    getStorefrontBrands(storeId),
+  ]);
+
   const categoryById = new Map<string, StorefrontCategory>();
   const categoryBySlug = new Map<string, StorefrontCategory>();
   for (const cat of categories) {
@@ -164,40 +508,30 @@ export async function getStorefrontProducts(
     categoryBySlug.set(cat.slug, cat);
   }
 
+  const needsInMemoryDealSort = Boolean(filters.onlyDeals) || sort === "deals";
+
   let query = supabase
     .from("products")
-    .select(
-      `
-      id,
-      store_id,
-      category_id,
-      name,
-      slug,
-      brand,
-      model_number,
-      price_kes,
-      compare_at_price_kes,
-      short_description,
-      warranty_type,
-      warranty_months,
-      stock_status,
-      stock_quantity,
-      is_bulky,
-      is_featured
-    `
-    )
+    .select(PRODUCT_CARD_COLUMNS, {
+      count: needsInMemoryDealSort ? undefined : "exact",
+    })
     .eq("store_id", storeId)
     .eq("is_published", true)
-    .is("deleted_at", null)
-    .order("is_featured", { ascending: false })
-    .order("created_at", { ascending: false });
+    .is("deleted_at", null);
 
   if (filters.categorySlug && filters.categorySlug !== "all") {
     const matchedCat = categoryBySlug.get(filters.categorySlug);
     if (matchedCat) {
       query = query.eq("category_id", matchedCat.id);
     } else {
-      return { products: [], brands: [] };
+      return {
+        products: [],
+        brands,
+        totalCount: 0,
+        page: 1,
+        pageSize,
+        totalPages: 1,
+      };
     }
   }
 
@@ -217,6 +551,14 @@ export async function getStorefrontProducts(
     query = query.neq("stock_status", "out_of_stock");
   }
 
+  if (filters.onlyFeatured) {
+    query = query.eq("is_featured", true);
+  }
+
+  if (needsInMemoryDealSort) {
+    query = query.not("compare_at_price_kes", "is", null);
+  }
+
   if (filters.search && filters.search.trim().length > 0) {
     const cleanedTerm = filters.search.trim().replaceAll(",", " ");
     query = query.or(
@@ -224,80 +566,101 @@ export async function getStorefrontProducts(
     );
   }
 
-  const { data: rows, error } = await query;
-  if (error) {
-    throw new Error(`Failed to load storefront products: ${error.message}`);
-  }
-
-  const productRows = rows ?? [];
-
-  const brandSet = new Set<string>();
-  for (const row of productRows) {
-    if (row.brand?.trim()) {
-      brandSet.add(row.brand.trim());
+  if (needsInMemoryDealSort) {
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(`Failed to load storefront deals: ${error.message}`);
     }
-  }
-  if (filters.brand && filters.brand !== "all" && filters.brand.trim()) {
-    brandSet.add(filters.brand.trim());
-  }
-  const brands = Array.from(brandSet).sort((a, b) => a.localeCompare(b));
 
-  const productIds = productRows.map((p) => p.id);
-  const imageMap = new Map<
-    string,
-    { public_url: string; alt_text: string | null }
-  >();
+    const sortedDeals = ((data ?? []) as RawProductCardRow[])
+      .filter(hasValidDiscount)
+      .sort(compareByHottestDeal);
 
-  if (productIds.length > 0) {
-    const { data: images } = await supabase
-      .from("product_images")
-      .select("product_id, public_url, alt_text, sort_order")
-      .in("product_id", productIds)
-      .eq("is_primary", true)
-      .order("sort_order", { ascending: true });
+    const totalCount = sortedDeals.length;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const page = Math.min(requestedPage, totalPages);
+    const start = (page - 1) * pageSize;
+    const pageRows = sortedDeals.slice(start, start + pageSize);
 
-    for (const img of images ?? []) {
-      if (!imageMap.has(img.product_id)) {
-        imageMap.set(img.product_id, {
-          public_url: img.public_url,
-          alt_text: img.alt_text,
-        });
-      }
-    }
-  }
+    const imageMap = await fetchPrimaryImageMap(pageRows.map((r) => r.id));
 
-  const products: StorefrontProductCard[] = productRows.map((p) => {
-    const cat = p.category_id ? categoryById.get(p.category_id) : undefined;
-    const primaryImg = imageMap.get(p.id);
     return {
-      id: p.id,
-      store_id: p.store_id,
-      category_id: p.category_id,
-      name: p.name,
-      slug: p.slug,
-      brand: p.brand,
-      model_number: p.model_number,
-      price_kes: p.price_kes,
-      compare_at_price_kes: p.compare_at_price_kes,
-      short_description: p.short_description,
-      warranty_type: p.warranty_type as "manufacturer" | "shop" | "none",
-      warranty_months: p.warranty_months,
-      stock_status: p.stock_status as
-        | "in_stock"
-        | "low_stock"
-        | "confirm_availability"
-        | "out_of_stock",
-      stock_quantity: p.stock_quantity,
-      is_bulky: p.is_bulky,
-      is_featured: p.is_featured,
-      primary_image_url: primaryImg?.public_url ?? null,
-      primary_image_alt: primaryImg?.alt_text ?? p.name,
-      category_name: cat?.name ?? null,
-      category_slug: cat?.slug ?? null,
+      products: mapProductCards(pageRows, categoryById, imageMap),
+      brands,
+      totalCount,
+      page,
+      pageSize,
+      totalPages,
     };
-  });
+  }
 
-  return { products, brands };
+  switch (sort) {
+    case "newest":
+      query = query.order("created_at", { ascending: false });
+      break;
+    case "price_asc":
+      query = query
+        .order("price_kes", { ascending: true })
+        .order("created_at", { ascending: false });
+      break;
+    case "price_desc":
+      query = query
+        .order("price_kes", { ascending: false })
+        .order("created_at", { ascending: false });
+      break;
+    default:
+      query = query
+        .order("is_featured", { ascending: false })
+        .order("created_at", { ascending: false });
+      break;
+  }
+
+  const from = (requestedPage - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data: rows, count, error } = await query.range(from, to);
+
+  if (error) {
+    throw new Error(`Failed to load storefront catalog: ${error.message}`);
+  }
+
+  const totalCount = count ?? (rows?.length ?? 0);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const page = Math.min(requestedPage, totalPages);
+
+  // If user requested a page past totalPages, return the clamped final page cleanly.
+  let pageRows = (rows ?? []) as RawProductCardRow[];
+  if (requestedPage > totalPages && totalCount > 0) {
+    const clampedFrom = (totalPages - 1) * pageSize;
+    const clampedTo = clampedFrom + pageSize - 1;
+    const { data: clampedRows } = await query.range(clampedFrom, clampedTo);
+    pageRows = (clampedRows ?? []) as RawProductCardRow[];
+  }
+
+  const imageMap = await fetchPrimaryImageMap(pageRows.map((r) => r.id));
+
+  return {
+    products: mapProductCards(pageRows, categoryById, imageMap),
+    brands,
+    totalCount,
+    page,
+    pageSize,
+    totalPages,
+  };
+}
+
+export async function getStorefrontProducts(
+  storeId: string,
+  filters: StorefrontCatalogFilter = {}
+): Promise<{
+  products: StorefrontProductCard[];
+  brands: string[];
+}> {
+  const result = await getPaginatedStorefrontCatalog(storeId, {
+    ...filters,
+    page: 1,
+    pageSize: 48,
+  });
+  return { products: result.products, brands: result.brands };
 }
 
 export async function getStorefrontProductBySlug(

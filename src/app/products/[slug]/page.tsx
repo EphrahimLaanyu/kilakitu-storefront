@@ -88,7 +88,8 @@ export default async function ProductDetailPage({
         {/* Top Back Link */}
         <div className="pb-5 border-b border-neutral-200 text-xs">
           <Link
-            href="/"
+            href="/catalog"
+            prefetch={false}
             className="inline-flex items-center gap-2 font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
             <ArrowLeft className="h-3.5 w-3.5" />
