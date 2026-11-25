@@ -12,7 +12,7 @@ function timingSafeEqualHex(a: string, b: string): boolean {
 
 async function computeHmacSha512Hex(
   secret: string,
-  rawBytes: Uint8Array
+  rawText: string
 ): Promise<string> {
   const encoder = new TextEncoder();
   const key = await crypto.subtle.importKey(
@@ -22,6 +22,7 @@ async function computeHmacSha512Hex(
     false,
     ["sign"]
   );
+  const rawBytes = encoder.encode(rawText);
   const sigBuffer = await crypto.subtle.sign("HMAC", key, rawBytes);
   return Array.from(new Uint8Array(sigBuffer))
     .map((b) => b.toString(16).padStart(2, "0"))
@@ -44,9 +45,9 @@ export async function POST(request: Request) {
     const signatureHeader = (
       request.headers.get("x-paystack-signature") ?? ""
     ).toLowerCase();
-    const rawBytes = new Uint8Array(await request.arrayBuffer());
+    const rawText = await request.text();
     const expectedHex = (
-      await computeHmacSha512Hex(paystackSecretKey, rawBytes)
+      await computeHmacSha512Hex(paystackSecretKey, rawText)
     ).toLowerCase();
 
     if (!timingSafeEqualHex(signatureHeader, expectedHex)) {
@@ -56,7 +57,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const event = JSON.parse(new TextDecoder().decode(rawBytes));
+    const event = JSON.parse(rawText);
     const eventName: string = event?.event ?? "";
     const data = event?.data ?? {};
     const reference: string | undefined = data?.reference;
