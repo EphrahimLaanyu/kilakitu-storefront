@@ -3,7 +3,13 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import {
+  ArrowLeft,
+  CheckCircle2,
+  AlertCircle,
+  KeyRound,
+  ShieldCheck,
+} from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useCart } from "@/components/storefront/CartContext";
 import type { StorefrontDeliveryZone } from "@/lib/db/storefront";
@@ -138,6 +144,25 @@ export default function CheckoutPage() {
     hasBulkyItem && selectedZone ? selectedZone.bulky_surcharge_kes : 0;
   const totalKes = subtotalKes + deliveryFeeKes + bulkySurchargeKes;
 
+  async function startPaystackCheckout(orderId: string) {
+    const res = await fetch("/api/payments/paystack/initialize", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        order_id: orderId,
+        callback_url: `${window.location.origin}/orders`,
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json?.authorization_url) {
+      throw new Error(json?.error || "Could not start Paystack payment.");
+    }
+
+    clearCart();
+    window.location.href = json.authorization_url;
+  }
+
   async function handlePlaceOrder(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
@@ -147,7 +172,7 @@ export default function CheckoutPage() {
       return;
     }
     if (items.length === 0) {
-      setErrorMsg("Your bag is empty.");
+      setErrorMsg("Your cart is empty.");
       return;
     }
     if (!selectedZoneId) {
@@ -182,210 +207,199 @@ export default function CheckoutPage() {
         return;
       }
 
-      setCreatedOrder(data as CreatedOrderSummary);
+      const summary = data as CreatedOrderSummary;
+
+      if (paymentMethod === "mpesa_stk") {
+        await startPaystackCheckout(summary.order_id);
+        return;
+      }
+
+      setCreatedOrder(summary);
       clearCart();
       setSubmitting(false);
-    } catch {
-      setErrorMsg("Unexpected error placing order. Please try again.");
+    } catch (err) {
+      setErrorMsg(
+        err instanceof Error
+          ? err.message
+          : "Unexpected error placing order. Please try again."
+      );
       setSubmitting(false);
     }
   }
 
   return (
-    <main className="bg-white min-h-screen">
-      <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-20">
-        <div className="flex items-center justify-between gap-4 pb-6 border-b border-neutral-200 text-xs">
+    <div className="min-h-screen bg-slate-50 text-slate-900">
+      <header className="bg-white border-b border-slate-200">
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
+            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-900"
           >
-            <ArrowLeft className="h-3.5 w-3.5" />
+            <ArrowLeft className="h-4 w-4" />
             <span>Back to Catalog</span>
           </Link>
-          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
-            {storeName}
+          <span className="text-xs font-semibold text-[#C81E2B]">
+            Checkout • {storeName}
           </span>
         </div>
+      </header>
 
+      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {!authChecked ? (
-          <div className="py-16 text-center text-sm text-neutral-500">
-            Verifying account session...
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500 max-w-md mx-auto">
+            Checking account session...
           </div>
         ) : createdOrder ? (
-          <div className="max-w-2xl mx-auto pt-10 space-y-6">
-            <div className="border-b border-neutral-200 pb-5 space-y-1">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#C81E2B]">
-                Order Confirmed
-              </p>
-              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950">
-                Thank you for your order
-              </h1>
-              <p className="text-xs text-neutral-500">
-                Recorded under {storeName} and linked to your account.
-              </p>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto space-y-5">
+            <div className="flex items-center gap-3 text-emerald-700">
+              <CheckCircle2 className="h-7 w-7 shrink-0" />
+              <div>
+                <h1 className="text-xl font-bold text-slate-900">
+                  Order Placed Successfully!
+                </h1>
+                <p className="text-xs text-slate-600">
+                  Saved to your account for {storeName}.
+                </p>
+              </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-neutral-200 border border-neutral-200">
-              <div className="p-5">
-                <p className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   Order Number
                 </p>
-                <p className="text-lg font-semibold text-neutral-950 mt-1 tabular-nums">
+                <p className="text-lg font-extrabold text-slate-900 mt-0.5">
                   {createdOrder.order_number}
                 </p>
               </div>
-              <div className="p-5">
-                <p className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
                   4-Digit Handover PIN
                 </p>
-                <p className="text-lg font-semibold text-[#C81E2B] mt-1 tabular-nums tracking-widest">
-                  {createdOrder.delivery_code}
+                <p className="inline-flex items-center gap-1.5 text-lg font-extrabold text-neutral-900 mt-0.5">
+                  <KeyRound className="h-4 w-4 text-[#C81E2B]" />
+                  <span>{createdOrder.delivery_code}</span>
                 </p>
               </div>
             </div>
 
-            <div className="divide-y divide-neutral-100 border-t border-b border-neutral-200 text-xs sm:text-sm">
-              <div className="py-3 flex justify-between text-neutral-600">
-                <span>Items Subtotal</span>
-                <span className="tabular-nums text-neutral-950">
-                  {formatKes(createdOrder.subtotal_kes)}
-                </span>
-              </div>
-              <div className="py-3 flex justify-between text-neutral-600">
-                <span>Delivery Zone Fee</span>
-                <span className="tabular-nums text-neutral-950">
-                  {formatKes(createdOrder.delivery_fee_kes)}
-                </span>
-              </div>
-              {createdOrder.bulky_surcharge_kes > 0 && (
-                <div className="py-3 flex justify-between text-neutral-700">
-                  <span>Bulky Item Surcharge</span>
-                  <span className="tabular-nums text-neutral-950">
-                    {formatKes(createdOrder.bulky_surcharge_kes)}
-                  </span>
-                </div>
-              )}
-              <div className="py-3.5 flex justify-between text-sm sm:text-base font-semibold text-neutral-950">
+            <div className="text-sm space-y-1.5 border-t border-slate-100 pt-4">
+              <div className="flex justify-between text-base font-extrabold text-slate-900">
                 <span>Total</span>
-                <span className="tabular-nums">
-                  {formatKes(createdOrder.total_kes)}
-                </span>
+                <span>{formatKes(createdOrder.total_kes)}</span>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-4 pt-2">
+            <div className="flex flex-wrap gap-3 pt-2">
               <Link
                 href="/orders"
-                className="py-3 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] text-white text-xs sm:text-sm font-semibold transition-colors"
+                className="px-4 py-2.5 rounded-xl bg-[#C81E2B] hover:bg-[#A61621] text-white text-xs font-bold"
               >
                 View My Orders
               </Link>
               <Link
                 href="/"
-                className="py-3 px-4 text-xs sm:text-sm font-medium text-neutral-600 hover:text-neutral-950 underline underline-offset-4"
+                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold"
               >
                 Continue Shopping
               </Link>
             </div>
           </div>
         ) : items.length === 0 ? (
-          <div className="py-20 text-center max-w-md mx-auto space-y-4">
-            <h1 className="text-xl font-semibold text-neutral-950">
-              Your shopping bag is empty
+          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center max-w-lg mx-auto space-y-3">
+            <h1 className="text-lg font-bold text-slate-900">
+              Your cart is empty
             </h1>
-            <p className="text-xs sm:text-sm text-neutral-500">
-              Add items to your bag before proceeding to checkout.
+            <p className="text-sm text-slate-600">
+              Add at least one item to your cart before checking out.
             </p>
-            <div className="pt-2">
-              <Link
-                href="/"
-                className="inline-block py-3 px-5 rounded-md bg-neutral-950 text-white text-xs font-semibold"
-              >
-                Browse Catalog
-              </Link>
-            </div>
+            <Link
+              href="/"
+              className="inline-block px-4 py-2.5 rounded-xl bg-[#C81E2B] text-white text-xs font-bold"
+            >
+              Browse Products
+            </Link>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 pt-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             <form
               onSubmit={handlePlaceOrder}
-              className="lg:col-span-7 space-y-6"
+              className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-5"
             >
-              <div className="border-b border-neutral-200 pb-4">
-                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950">
-                  Checkout
-                </h1>
+              <div>
+                <h1 className="text-xl font-bold text-slate-900">Checkout</h1>
                 {userEmail && (
-                  <p className="text-xs text-neutral-500 mt-1">
-                    Account: <span className="text-neutral-900">{userEmail}</span>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Signed in as <strong>{userEmail}</strong>
                   </p>
                 )}
               </div>
 
               {errorMsg && (
-                <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-4 py-3 text-xs text-[#C81E2B] font-medium">
-                  {errorMsg}
+                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700">
+                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                  <span>{errorMsg}</span>
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                    Full Name
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Full Name *
                   </label>
                   <input
                     type="text"
                     required
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="Brian Otieno"
-                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
+                    placeholder="e.g. Brian Otieno"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                    Phone Number
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Phone Number *
                   </label>
                   <input
                     type="tel"
                     required
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="+254712345678"
-                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
+                    placeholder="e.g. +254712345678"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                    WhatsApp (Optional)
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    WhatsApp Number (Optional)
                   </label>
                   <input
                     type="tel"
                     value={customerWhatsapp}
                     onChange={(e) => setCustomerWhatsapp(e.target.value)}
                     placeholder="Same as phone if blank"
-                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
                   />
                 </div>
 
-                <div className="space-y-1.5">
-                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                    Delivery / Pickup Zone
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">
+                    Delivery / Pickup Zone *
                   </label>
                   <select
                     required
                     disabled={loadingZones}
                     value={selectedZoneId}
                     onChange={(e) => setSelectedZoneId(e.target.value)}
-                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm font-medium text-neutral-950 focus:outline-none"
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white text-slate-900"
                   >
                     {zones.map((z) => (
                       <option key={z.id} value={z.id}>
-                        {z.name} — {formatKes(z.fee_kes)}
+                        {z.name} ({formatKes(z.fee_kes)})
                       </option>
                     ))}
                   </select>
@@ -393,39 +407,33 @@ export default function CheckoutPage() {
               </div>
 
               {selectedZone && (
-                <div className="border-t border-b border-neutral-100 py-3.5 text-xs text-neutral-600 space-y-1">
-                  <p className="font-medium text-neutral-950">
+                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 space-y-1">
+                  <p className="font-semibold text-slate-900">
                     {selectedZone.name} • {selectedZone.estimated_delivery_text}
                   </p>
                   {selectedZone.cutoff_time_text && (
-                    <p>{selectedZone.cutoff_time_text}</p>
-                  )}
-                  {hasBulkyItem && selectedZone.bulky_surcharge_kes > 0 && (
-                    <p className="text-neutral-800">
-                      Bulky item surcharge:{" "}
-                      <span className="font-semibold tabular-nums">
-                        {formatKes(selectedZone.bulky_surcharge_kes)}
-                      </span>
+                    <p className="text-slate-500">
+                      {selectedZone.cutoff_time_text}
                     </p>
                   )}
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
-                  Delivery Landmark / Estate / Building
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Delivery Landmark / Building / Estate
                 </label>
                 <input
                   type="text"
                   value={deliveryLandmark}
                   onChange={(e) => setDeliveryLandmark(e.target.value)}
-                  placeholder="Kilimani, Yaya Centre side, Apartment B4"
-                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
+                  placeholder="e.g. Kilimani, Yaya Centre side, Apartment B4"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
                 />
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Payment Method
                 </label>
                 <select
@@ -438,102 +446,100 @@ export default function CheckoutPage() {
                         | "pay_on_pickup"
                     )
                   }
-                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm font-medium text-neutral-950 focus:outline-none"
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white text-slate-900"
                 >
-                  <option value="mpesa_stk">M-Pesa</option>
+                  <option value="mpesa_stk">
+                    Pay Online via Paystack (M-Pesa / Card)
+                  </option>
                   <option value="pay_on_delivery">Pay on Delivery</option>
                   <option value="pay_on_pickup">Pay at Shop Pickup</option>
                 </select>
               </div>
 
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Delivery Notes (Optional)
                 </label>
                 <textarea
                   rows={2}
                   value={deliveryNotes}
                   onChange={(e) => setDeliveryNotes(e.target.value)}
-                  placeholder="Instructions for rider or shop handover"
-                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
+                  placeholder="Any helpful instructions for rider or shop staff..."
+                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={submitting || items.length === 0}
-                className="w-full py-3.5 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] disabled:opacity-50 text-white text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer tabular-nums"
+                className="w-full py-3 rounded-xl bg-[#C81E2B] hover:bg-[#A61621] disabled:opacity-60 text-white text-sm font-bold transition cursor-pointer"
               >
                 {submitting
-                  ? "Placing Order..."
+                  ? "Processing..."
+                  : paymentMethod === "mpesa_stk"
+                  ? `Pay via Paystack • ${formatKes(totalKes)}`
                   : `Place Order • ${formatKes(totalKes)}`}
               </button>
             </form>
 
-            {/* Summary Column */}
-            <aside className="lg:col-span-5 lg:border-l lg:border-neutral-200 lg:pl-10 space-y-6 h-fit">
-              <div className="border-b border-neutral-200 pb-3">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
-                  Order Summary
-                </h2>
-              </div>
+            <aside className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 space-y-4 h-fit">
+              <h2 className="text-base font-bold text-slate-900">
+                Order Summary
+              </h2>
 
-              <div className="divide-y divide-neutral-100 text-xs sm:text-sm">
+              <div className="divide-y divide-slate-100 text-sm">
                 {items.map((item) => (
                   <div
                     key={item.productId}
-                    className="py-3.5 flex items-baseline justify-between gap-4"
+                    className="py-3 flex items-center justify-between gap-3"
                   >
                     <div className="min-w-0">
-                      <p className="font-medium text-neutral-950 truncate">
+                      <p className="font-semibold text-slate-900 truncate">
                         {item.name}
                       </p>
-                      <p className="text-xs text-neutral-500 tabular-nums">
+                      <p className="text-xs text-slate-500">
                         {item.quantity} × {formatKes(item.priceKes)}
                       </p>
                     </div>
-                    <span className="font-semibold text-neutral-950 tabular-nums shrink-0">
+                    <span className="font-bold text-slate-900 shrink-0">
                       {formatKes(item.quantity * item.priceKes)}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <div className="border-t border-neutral-200 pt-4 space-y-2.5 text-xs sm:text-sm">
-                <div className="flex justify-between text-neutral-600">
+              <div className="border-t border-slate-200 pt-3 space-y-2 text-sm">
+                <div className="flex justify-between text-slate-600">
                   <span>Subtotal</span>
-                  <span className="tabular-nums text-neutral-950">
-                    {formatKes(subtotalKes)}
-                  </span>
+                  <span>{formatKes(subtotalKes)}</span>
                 </div>
-                <div className="flex justify-between text-neutral-600">
-                  <span>Delivery Fee</span>
-                  <span className="tabular-nums text-neutral-950">
-                    {formatKes(deliveryFeeKes)}
-                  </span>
+                <div className="flex justify-between text-slate-600">
+                  <span>Delivery Zone Fee</span>
+                  <span>{formatKes(deliveryFeeKes)}</span>
                 </div>
                 {bulkySurchargeKes > 0 && (
-                  <div className="flex justify-between text-neutral-700">
+                  <div className="flex justify-between text-amber-800">
                     <span>Bulky Item Surcharge</span>
-                    <span className="tabular-nums text-neutral-950">
-                      {formatKes(bulkySurchargeKes)}
-                    </span>
+                    <span>{formatKes(bulkySurchargeKes)}</span>
                   </div>
                 )}
-                <div className="flex justify-between text-sm sm:text-base font-semibold text-neutral-950 pt-3 border-t border-neutral-200">
+                <div className="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-100">
                   <span>Total Payable</span>
-                  <span className="tabular-nums">{formatKes(totalKes)}</span>
+                  <span>{formatKes(totalKes)}</span>
                 </div>
               </div>
 
-              <p className="text-xs text-neutral-500 leading-relaxed border-t border-neutral-100 pt-4">
-                Pricing, stock availability, and your 4-digit handover PIN are
-                issued upon order confirmation.
-              </p>
+              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 flex items-start gap-2">
+                <ShieldCheck className="h-4 w-4 text-[#C81E2B] shrink-0 mt-0.5" />
+                <span>
+                  Order totals are verified on the server and confirmed via
+                  Paystack webhook.
+                </span>
+              </div>
             </aside>
           </div>
         )}
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }
