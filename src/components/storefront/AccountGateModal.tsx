@@ -42,8 +42,6 @@ export function AccountGateModal() {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
-  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   useEffect(() => {
     function handleGateEvent(event: Event) {
@@ -53,8 +51,6 @@ export function AccountGateModal() {
       );
       setEventReason(customEvent.detail?.reason || DEFAULT_REASON);
       setErrorMsg(null);
-      setInfoMsg(null);
-      setNeedsConfirmation(false);
       setEventOpen(true);
     }
 
@@ -69,8 +65,6 @@ export function AccountGateModal() {
   useEffect(() => {
     if (open) {
       setErrorMsg(null);
-      setInfoMsg(null);
-      setNeedsConfirmation(false);
     }
   }, [open]);
 
@@ -90,16 +84,12 @@ export function AccountGateModal() {
     setEventOpen(false);
     setPassword("");
     setErrorMsg(null);
-    setInfoMsg(null);
-    setNeedsConfirmation(false);
     closeAuthGate();
   }
 
   async function handleInlineLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
-    setInfoMsg(null);
-    setNeedsConfirmation(false);
     setSubmitting(true);
 
     try {
@@ -110,9 +100,6 @@ export function AccountGateModal() {
       });
 
       if (error) {
-        if (error.message.toLowerCase().includes("email not confirmed")) {
-          setNeedsConfirmation(true);
-        }
         setErrorMsg(error.message);
         setSubmitting(false);
         return;
@@ -160,34 +147,6 @@ export function AccountGateModal() {
     }
   }
 
-  async function handleResendConfirmation() {
-    if (!email.trim()) return;
-    setSubmitting(true);
-    setErrorMsg(null);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: email.trim(),
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-            safeNext
-          )}`,
-        },
-      });
-      if (error) {
-        setErrorMsg(error.message);
-      } else {
-        setNeedsConfirmation(false);
-        setInfoMsg(
-          "Confirmation email resent. Check your inbox and spam folder."
-        );
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/50 backdrop-blur-[1px]">
       <div className="w-full max-w-md bg-white border border-neutral-200 rounded-lg p-6 sm:p-7 space-y-5 shadow-xl">
@@ -213,23 +172,8 @@ export function AccountGateModal() {
         <p className="text-xs text-neutral-600 leading-relaxed">{reasonText}</p>
 
         {errorMsg && (
-          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium space-y-2">
-            <p>{errorMsg}</p>
-            {needsConfirmation && (
-              <button
-                type="button"
-                onClick={handleResendConfirmation}
-                className="underline underline-offset-4 font-semibold text-neutral-950 cursor-pointer"
-              >
-                Resend confirmation email
-              </button>
-            )}
-          </div>
-        )}
-
-        {infoMsg && (
-          <div className="border-l-2 border-neutral-950 bg-neutral-50 px-3.5 py-2.5 text-xs text-neutral-800">
-            {infoMsg}
+          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium">
+            {errorMsg}
           </div>
         )}
 

@@ -13,29 +13,14 @@ function LoginFormInner() {
   const searchParams = useSearchParams();
   const safeNext = sanitizeNextPath(searchParams.get("next"), "/");
   const callbackError = searchParams.get("error");
-  const callbackMessage = searchParams.get("message");
-  const emailPrefill = searchParams.get("email")?.trim() || "";
 
-  const isEmailConfirmFallback = callbackMessage === "email_confirmed_or_retry";
-
-  const [email, setEmail] = useState(emailPrefill);
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [resending, setResending] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
   const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(
-    callbackError
-      ? "Authentication link or Google sign-in expired. Please try again."
-      : null
-  );
-  const [infoMsg, setInfoMsg] = useState<string | null>(
-    isEmailConfirmFallback
-      ? "Your confirmation link was opened in another browser or has already been verified. Sign in below with your email and password, or resend a fresh confirmation email if needed."
-      : null
-  );
-  const [needsConfirmation, setNeedsConfirmation] = useState(
-    isEmailConfirmFallback
+    callbackError ? "Google sign-in could not be completed. Please try again." : null
   );
 
   useEffect(() => {
@@ -65,7 +50,6 @@ function LoginFormInner() {
   async function handleSwitchAccount() {
     setSigningOut(true);
     setErrorMsg(null);
-    setInfoMsg(null);
     try {
       const supabase = createClient();
       await supabase.auth.signOut();
@@ -81,8 +65,6 @@ function LoginFormInner() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
-    setInfoMsg(null);
-    setNeedsConfirmation(false);
     setSubmitting(true);
 
     try {
@@ -93,20 +75,7 @@ function LoginFormInner() {
       });
 
       if (error) {
-        const lowerMsg = error.message.toLowerCase();
-        const isUnconfirmed =
-          error.code === "email_not_confirmed" ||
-          lowerMsg.includes("email not confirmed") ||
-          lowerMsg.includes("not confirmed");
-
-        if (isUnconfirmed) {
-          setNeedsConfirmation(true);
-          setErrorMsg(
-            "Your email address is not confirmed yet. Open the link in your inbox or resend a fresh confirmation email below."
-          );
-        } else {
-          setErrorMsg(error.message);
-        }
+        setErrorMsg(error.message);
         setSubmitting(false);
         return;
       }
@@ -131,41 +100,6 @@ function LoginFormInner() {
     } catch {
       setErrorMsg("Unable to sign in right now. Please try again.");
       setSubmitting(false);
-    }
-  }
-
-  async function handleResendConfirmation() {
-    const targetEmail = email.trim();
-    if (!targetEmail) {
-      setErrorMsg(
-        "Enter your email address below first so we know where to resend the confirmation link."
-      );
-      return;
-    }
-
-    setResending(true);
-    setErrorMsg(null);
-    try {
-      const supabase = createClient();
-      const { error } = await supabase.auth.resend({
-        type: "signup",
-        email: targetEmail,
-        options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-            safeNext
-          )}&email=${encodeURIComponent(targetEmail)}`,
-        },
-      });
-      if (error) {
-        setErrorMsg(error.message);
-      } else {
-        setNeedsConfirmation(false);
-        setInfoMsg(
-          `Confirmation email resent to ${targetEmail}. Check your inbox and spam folder, and open the link in this browser.`
-        );
-      }
-    } finally {
-      setResending(false);
     }
   }
 
@@ -210,34 +144,8 @@ function LoginFormInner() {
         )}
 
         {errorMsg && (
-          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium space-y-2">
-            <p>{errorMsg}</p>
-            {needsConfirmation && (
-              <button
-                type="button"
-                disabled={resending}
-                onClick={handleResendConfirmation}
-                className="underline underline-offset-4 font-semibold text-neutral-950 hover:text-[#C81E2B] cursor-pointer disabled:opacity-50"
-              >
-                {resending ? "Resending..." : "Resend confirmation email"}
-              </button>
-            )}
-          </div>
-        )}
-
-        {infoMsg && (
-          <div className="border-l-2 border-[#D4A024] bg-neutral-50 px-3.5 py-3 text-xs text-neutral-800 space-y-2 leading-relaxed">
-            <p>{infoMsg}</p>
-            {needsConfirmation && !errorMsg && (
-              <button
-                type="button"
-                disabled={resending}
-                onClick={handleResendConfirmation}
-                className="underline underline-offset-4 font-semibold text-neutral-950 hover:text-[#C81E2B] cursor-pointer disabled:opacity-50"
-              >
-                {resending ? "Resending..." : "Resend confirmation email"}
-              </button>
-            )}
+          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium">
+            {errorMsg}
           </div>
         )}
 
