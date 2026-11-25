@@ -7,7 +7,7 @@ import {
   Search,
   User,
   ChevronDown,
-  ShoppingBag,
+  ShoppingCart,
   X,
   ArrowUpRight,
 } from "lucide-react";
@@ -533,12 +533,12 @@ function StorefrontNavbarInner({
             <button
               type="button"
               onClick={openDrawer}
-              aria-label={`Shopping bag with ${totalCount} items`}
+              aria-label={`Shopping cart with ${totalCount} items`}
               className="pl-3 sm:pl-4 py-1.5 inline-flex items-center gap-2 text-neutral-950 hover:text-[#C81E2B] transition-colors cursor-pointer"
             >
-              <ShoppingBag className="h-4 w-4 stroke-[1.75]" />
+              <ShoppingCart className="h-4 w-4 stroke-[1.75]" />
               <span className="text-xs font-semibold tracking-tight">
-                Bag
+                Cart
               </span>
               <span className="text-xs font-bold text-[#C81E2B] tabular-nums">
                 ({totalCount})

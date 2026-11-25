@@ -4,6 +4,7 @@ import {
   getStorefrontCategories,
   getStorefrontProducts,
 } from "@/lib/db/storefront";
+import { CatalogAddToCartButton } from "@/components/storefront/CatalogAddToCartButton";
 
 export const dynamic = "force-dynamic";
 
@@ -302,13 +303,17 @@ export default async function StorefrontHomePage({
                   )
                 : 0;
 
+              const isOutOfStock = product.stock_status === "out_of_stock";
+
               return (
-                <Link
+                <article
                   key={product.id}
-                  href={`/products/${product.slug}`}
                   className="group flex flex-col justify-between"
                 >
-                  <div>
+                  <Link
+                    href={`/products/${product.slug}`}
+                    className="block flex-1"
+                  >
                     {/* Clean Studio Product Canvas */}
                     <div className="relative aspect-square bg-[#F7F7F7] border border-neutral-200/70 group-hover:border-neutral-400 transition-colors overflow-hidden flex items-center justify-center p-4 sm:p-6">
                       {product.primary_image_url ? (
@@ -361,20 +366,34 @@ export default async function StorefrontHomePage({
                         </p>
                       )}
                     </div>
-                  </div>
+                  </Link>
 
-                  {/* Clean Hairline Price Footer */}
-                  <div className="mt-3 pt-2.5 border-t border-neutral-100 flex items-baseline justify-between gap-2">
-                    <span className="text-sm sm:text-base font-semibold text-neutral-950 tabular-nums">
-                      {formatKes(product.price_kes)}
-                    </span>
-                    {hasDiscount && (
-                      <span className="text-xs text-neutral-400 line-through tabular-nums">
-                        {formatKes(product.compare_at_price_kes!)}
+                  {/* Clean Hairline Price Footer + Direct Add to Cart */}
+                  <div className="mt-3 pt-2.5 border-t border-neutral-100">
+                    <div className="flex items-baseline justify-between gap-2">
+                      <span className="text-sm sm:text-base font-semibold text-neutral-950 tabular-nums">
+                        {formatKes(product.price_kes)}
                       </span>
-                    )}
+                      {hasDiscount && (
+                        <span className="text-xs text-neutral-400 line-through tabular-nums">
+                          {formatKes(product.compare_at_price_kes!)}
+                        </span>
+                      )}
+                    </div>
+
+                    <CatalogAddToCartButton
+                      productId={product.id}
+                      slug={product.slug}
+                      name={product.name}
+                      brand={product.brand}
+                      priceKes={product.price_kes}
+                      imageUrl={product.primary_image_url}
+                      warrantyText={warranty || "No warranty stated"}
+                      isBulky={product.is_bulky}
+                      disabled={isOutOfStock}
+                    />
                   </div>
-                </Link>
+                </article>
               );
             })}
           </section>

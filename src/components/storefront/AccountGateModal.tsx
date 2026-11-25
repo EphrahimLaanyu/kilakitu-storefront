@@ -18,9 +18,9 @@ type GateDetail = {
 const DEFAULT_REASON =
   "Sign in or create an account to save your order, warranty records, and 4-digit handover PIN.";
 const CART_REASON =
-  "Sign in or create a KilaKitu account to add items to your bag so your orders, warranty records, and 4-digit handover PIN stay linked to your account.";
+  "Sign in or create a KilaKitu account to add items to your cart so your orders, warranty records, and 4-digit handover PIN stay linked to your account.";
 const CHECKOUT_REASON =
-  "Sign in or create a KilaKitu account to complete checkout. Your shopping bag items will stay saved.";
+  "Sign in or create a KilaKitu account to complete checkout. Your shopping cart items will stay saved.";
 
 export function AccountGateModal() {
   const router = useRouter();

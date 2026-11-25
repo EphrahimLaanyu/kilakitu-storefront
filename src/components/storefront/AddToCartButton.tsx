@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ShoppingBag, Check } from "lucide-react";
+import { ShoppingCart, Check } from "lucide-react";
 import { useCart } from "./CartContext";
 
 type AddToCartProps = {
@@ -62,12 +62,12 @@ export function AddToCartButton({
       {added ? (
         <>
           <Check className="h-4 w-4" />
-          <span>Added to Bag</span>
+          <span>Added to Cart</span>
         </>
       ) : (
         <>
-          <ShoppingBag className="h-4 w-4 stroke-[1.75]" />
-          <span>{disabled ? "Currently Unavailable" : "Add to Bag"}</span>
+          <ShoppingCart className="h-4 w-4 stroke-[1.75]" />
+          <span>{disabled ? "Currently Unavailable" : "Add to Cart"}</span>
         </>
       )}
     </button>

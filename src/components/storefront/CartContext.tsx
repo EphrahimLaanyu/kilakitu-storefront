@@ -34,6 +34,7 @@ type PendingCartAdd = {
 type CartContextValue = {
   items: CartItem[];
   isDrawerOpen: boolean;
+  lastAddedProductId: string | null;
   isAuthenticated: boolean;
   authLoading: boolean;
   authGateReason: AuthGateReason;
@@ -62,6 +63,9 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [lastAddedProductId, setLastAddedProductId] = useState<string | null>(
+    null
+  );
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authLoading, setAuthLoading] = useState(true);
   const [authGateReason, setAuthGateReason] = useState<AuthGateReason>(null);
@@ -149,6 +153,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         setAuthLoading(false);
         setAuthGateReason(null);
         setIsDrawerOpen(false);
+        setLastAddedProductId(null);
         return;
       }
 
@@ -167,7 +172,10 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const openDrawer = useCallback(() => setIsDrawerOpen(true), []);
-  const closeDrawer = useCallback(() => setIsDrawerOpen(false), []);
+  const closeDrawer = useCallback(() => {
+    setIsDrawerOpen(false);
+    setLastAddedProductId(null);
+  }, []);
 
   const openAuthGate = useCallback(
     (reason: Exclude<AuthGateReason, null>, nextPath = "/checkout") => {
@@ -187,6 +195,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     if (!pending) return false;
     pendingAddRef.current = null;
     appendCartItem(pending.item, pending.quantity);
+    setLastAddedProductId(pending.item.productId);
     return true;
   }, [appendCartItem]);
 
@@ -201,6 +210,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
             setIsAuthenticated(true);
             setAuthLoading(false);
             appendCartItem(incoming, safeQty);
+            setLastAddedProductId(incoming.productId);
             setIsDrawerOpen(true);
           } else {
             setIsAuthenticated(false);
@@ -225,6 +235,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       }
 
       appendCartItem(incoming, safeQty);
+      setLastAddedProductId(incoming.productId);
       return true;
     },
     [authLoading, isAuthenticated, appendCartItem]
@@ -264,6 +275,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     () => ({
       items,
       isDrawerOpen,
+      lastAddedProductId,
       isAuthenticated,
       authLoading,
       authGateReason,
@@ -284,6 +296,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     [
       items,
       isDrawerOpen,
+      lastAddedProductId,
       isAuthenticated,
       authLoading,
       authGateReason,

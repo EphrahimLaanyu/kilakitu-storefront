@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronDown } from "lucide-react";
 import {
   getActiveStoreBySlug,
   getStorefrontProductBySlug,
@@ -85,8 +85,8 @@ export default async function ProductDetailPage({
   return (
     <main className="bg-white min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 pb-20">
-        {/* Top Breadcrumb Bar */}
-        <div className="flex items-center justify-between gap-4 pb-6 border-b border-neutral-200 text-xs">
+        {/* Top Back Link */}
+        <div className="pb-5 border-b border-neutral-200 text-xs">
           <Link
             href="/"
             className="inline-flex items-center gap-2 font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
@@ -94,15 +94,9 @@ export default async function ProductDetailPage({
             <ArrowLeft className="h-3.5 w-3.5" />
             <span>Back to Catalog</span>
           </Link>
-          <Link
-            href="/policies"
-            className="font-medium text-neutral-600 hover:text-neutral-950 underline underline-offset-4 transition-colors"
-          >
-            Warranty & Return Policy
-          </Link>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 pt-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 pt-8">
           {/* Gallery Column */}
           <div className="lg:col-span-7 space-y-4">
             <div className="aspect-square bg-[#F7F7F7] border border-neutral-200/80 flex items-center justify-center p-6 sm:p-12">
@@ -137,16 +131,17 @@ export default async function ProductDetailPage({
             )}
           </div>
 
-          {/* Details Column */}
-          <div className="lg:col-span-5 space-y-7">
-            <div className="space-y-3 pb-6 border-b border-neutral-200">
-              <div className="flex items-center justify-between gap-2 text-xs">
+          {/* Details Column — Clean & Minimal Above the Fold */}
+          <div className="lg:col-span-5 space-y-6">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3 text-xs">
                 <span className="font-semibold uppercase tracking-[0.12em] text-neutral-500">
                   {product.brand}
-                  {product.category_name ? ` / ${product.category_name}` : ""}
                 </span>
-                <span className="inline-flex items-center gap-1.5 font-medium text-neutral-700">
-                  <span className={`h-1.5 w-1.5 rounded-full ${stock.dotClass}`} />
+                <span className="inline-flex items-center gap-1.5 font-medium text-neutral-700 shrink-0">
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${stock.dotClass}`}
+                  />
                   <span>{stock.label}</span>
                 </span>
               </div>
@@ -155,15 +150,7 @@ export default async function ProductDetailPage({
                 {product.name}
               </h1>
 
-              {(product.model_number || product.sku) && (
-                <p className="text-xs text-neutral-500">
-                  {product.model_number ? `Model ${product.model_number}` : ""}
-                  {product.model_number && product.sku ? "  •  " : ""}
-                  {product.sku ? `SKU ${product.sku}` : ""}
-                </p>
-              )}
-
-              <div className="pt-2 flex items-baseline gap-3">
+              <div className="pt-1 flex items-baseline gap-3">
                 <span className="text-2xl sm:text-3xl font-semibold text-neutral-950 tabular-nums">
                   {formatKes(product.price_kes)}
                 </span>
@@ -174,16 +161,14 @@ export default async function ProductDetailPage({
                 )}
               </div>
 
-              <p className="text-xs text-neutral-500">{stock.note}</p>
+              {product.short_description && (
+                <p className="text-sm text-neutral-600 leading-relaxed line-clamp-2 pt-1">
+                  {product.short_description}
+                </p>
+              )}
             </div>
 
-            {product.short_description && (
-              <p className="text-sm text-neutral-700 leading-relaxed">
-                {product.short_description}
-              </p>
-            )}
-
-            <div className="space-y-3">
+            <div>
               <AddToCartButton
                 productId={product.id}
                 slug={product.slug}
@@ -197,76 +182,102 @@ export default async function ProductDetailPage({
               />
             </div>
 
-            {/* Key Terms & Fulfillment Breakdown */}
-            <div className="border-t border-neutral-200 divide-y divide-neutral-100 text-xs sm:text-sm">
-              <div className="py-3.5 flex items-baseline justify-between gap-4">
-                <span className="text-neutral-500">Warranty</span>
-                <span className="font-medium text-neutral-950 text-right">
-                  {warrantyLabel}
-                </span>
-              </div>
-              {product.warranty_notes && (
-                <div className="py-3 text-xs text-neutral-600 leading-relaxed">
-                  {product.warranty_notes}
-                </div>
+            {/* Collapsible Secondary Sections (Collapsed by Default) */}
+            <div className="border-t border-b border-neutral-200 divide-y divide-neutral-200">
+              {specEntries.length > 0 && (
+                <details className="group">
+                  <summary className="flex items-center justify-between gap-4 py-4 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-[0.12em] text-neutral-900 hover:text-[#C81E2B] transition-colors">
+                    <span>Specifications</span>
+                    <ChevronDown className="h-4 w-4 text-neutral-400 transition-transform duration-200 group-open:rotate-180 shrink-0" />
+                  </summary>
+                  <div className="pb-5">
+                    <dl className="divide-y divide-neutral-100 border-t border-neutral-100 text-xs sm:text-sm">
+                      {specEntries.map(([key, value]) => (
+                        <div
+                          key={key}
+                          className="py-2.5 flex items-baseline justify-between gap-4"
+                        >
+                          <dt className="text-neutral-500">{key}</dt>
+                          <dd className="font-medium text-neutral-950 text-right">
+                            {value}
+                          </dd>
+                        </div>
+                      ))}
+                    </dl>
+                  </div>
+                </details>
               )}
-              <div className="py-3.5 flex items-baseline justify-between gap-4">
-                <span className="text-neutral-500">Fulfillment</span>
-                <span className="font-medium text-neutral-950 text-right">
-                  Pickup & zone delivery
-                </span>
-              </div>
-              <div className="py-3.5 flex items-baseline justify-between gap-4">
-                <span className="text-neutral-500">Pickup Point</span>
-                <span className="font-medium text-neutral-950 text-right">
-                  {store.pickup_address}
-                </span>
-              </div>
-              {product.is_bulky && (
-                <div className="py-3 text-xs text-neutral-700">
-                  Bulky item — additional delivery zone surcharge applies.
+
+              <details className="group">
+                <summary className="flex items-center justify-between gap-4 py-4 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-[0.12em] text-neutral-900 hover:text-[#C81E2B] transition-colors">
+                  <span>Warranty &amp; Fulfillment</span>
+                  <ChevronDown className="h-4 w-4 text-neutral-400 transition-transform duration-200 group-open:rotate-180 shrink-0" />
+                </summary>
+                <div className="pb-5 divide-y divide-neutral-100 border-t border-neutral-100 text-xs sm:text-sm">
+                  <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <span className="text-neutral-500">Warranty</span>
+                    <span className="font-medium text-neutral-950 text-right">
+                      {warrantyLabel}
+                    </span>
+                  </div>
+                  {product.warranty_notes && (
+                    <div className="py-2.5 text-xs text-neutral-600 leading-relaxed">
+                      {product.warranty_notes}
+                    </div>
+                  )}
+                  <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <span className="text-neutral-500">Availability</span>
+                    <span className="font-medium text-neutral-950 text-right">
+                      {stock.note}
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <span className="text-neutral-500">Fulfillment</span>
+                    <span className="font-medium text-neutral-950 text-right">
+                      Pickup &amp; zone delivery
+                    </span>
+                  </div>
+                  <div className="py-2.5 flex items-baseline justify-between gap-4">
+                    <span className="text-neutral-500">Pickup Point</span>
+                    <span className="font-medium text-neutral-950 text-right">
+                      {store.pickup_address}
+                    </span>
+                  </div>
+                  {product.is_bulky && (
+                    <div className="py-2.5 text-xs text-neutral-700">
+                      Bulky item — additional delivery zone surcharge applies.
+                    </div>
+                  )}
+                  {product.requires_insured_courier && (
+                    <div className="py-2.5 text-xs text-neutral-700">
+                      High-value item — insured courier dispatch supported.
+                    </div>
+                  )}
+                  <div className="pt-3 text-xs">
+                    <Link
+                      href="/policies"
+                      className="font-medium text-neutral-600 hover:text-neutral-950 underline underline-offset-4 transition-colors"
+                    >
+                      View Warranty &amp; Return Policy
+                    </Link>
+                  </div>
                 </div>
-              )}
-              {product.requires_insured_courier && (
-                <div className="py-3 text-xs text-neutral-700">
-                  High-value item — insured courier dispatch supported.
-                </div>
+              </details>
+
+              {product.description && (
+                <details className="group">
+                  <summary className="flex items-center justify-between gap-4 py-4 cursor-pointer select-none list-none [&::-webkit-details-marker]:hidden text-xs font-semibold uppercase tracking-[0.12em] text-neutral-900 hover:text-[#C81E2B] transition-colors">
+                    <span>Overview</span>
+                    <ChevronDown className="h-4 w-4 text-neutral-400 transition-transform duration-200 group-open:rotate-180 shrink-0" />
+                  </summary>
+                  <div className="pb-5 pt-1 border-t border-neutral-100">
+                    <p className="text-sm text-neutral-700 whitespace-pre-line leading-relaxed pt-2">
+                      {product.description}
+                    </p>
+                  </div>
+                </details>
               )}
             </div>
-
-            {/* Technical Specifications */}
-            {specEntries.length > 0 && (
-              <div className="pt-4 border-t border-neutral-200 space-y-3">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
-                  Specifications
-                </h2>
-                <dl className="divide-y divide-neutral-100 border-t border-b border-neutral-100 text-xs sm:text-sm">
-                  {specEntries.map(([key, value]) => (
-                    <div
-                      key={key}
-                      className="py-3 flex items-baseline justify-between gap-4"
-                    >
-                      <dt className="text-neutral-500">{key}</dt>
-                      <dd className="font-medium text-neutral-950 text-right">
-                        {value}
-                      </dd>
-                    </div>
-                  ))}
-                </dl>
-              </div>
-            )}
-
-            {/* Overview */}
-            {product.description && (
-              <div className="pt-4 border-t border-neutral-200 space-y-2">
-                <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
-                  Overview
-                </h2>
-                <p className="text-sm text-neutral-700 whitespace-pre-line leading-relaxed">
-                  {product.description}
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </div>
