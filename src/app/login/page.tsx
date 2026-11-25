@@ -1,21 +1,24 @@
 "use client";
 
-import { FormEvent, Suspense, useState } from "react";
+import { FormEvent, Suspense, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthPath, sanitizeNextPath } from "@/lib/auth/redirects";
+import { syncUserProfile } from "@/lib/auth/profile";
 import { GoogleAuthButton } from "@/components/storefront/GoogleAuthButton";
 
 function LoginFormInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/";
-  const safeNext = nextPath.startsWith("/") ? nextPath : "/";
+  const safeNext = sanitizeNextPath(searchParams.get("next"), "/");
   const callbackError = searchParams.get("error");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [signedInEmail, setSignedInEmail] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(
     callbackError
       ? "Authentication link or Google sign-in expired. Please try again."
@@ -23,6 +26,46 @@ function LoginFormInner() {
   );
   const [infoMsg, setInfoMsg] = useState<string | null>(null);
   const [needsConfirmation, setNeedsConfirmation] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!active) return;
+      setSignedInEmail(user?.email ?? null);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        setSignedInEmail(null);
+      }
+    });
+
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
+  }, []);
+
+  async function handleSwitchAccount() {
+    setSigningOut(true);
+    setErrorMsg(null);
+    setInfoMsg(null);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      setSignedInEmail(null);
+      setEmail("");
+      setPassword("");
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+    }
+  }
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -33,7 +76,7 @@ function LoginFormInner() {
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
@@ -47,7 +90,16 @@ function LoginFormInner() {
         return;
       }
 
-      router.push(safeNext);
+      const {
+        data: { user: verifiedUser },
+      } = await supabase.auth.getUser();
+      const activeUser = verifiedUser ?? data.user;
+
+      if (activeUser) {
+        await syncUserProfile(supabase, activeUser);
+      }
+
+      router.replace(safeNext);
       router.refresh();
     } catch {
       setErrorMsg("Unable to sign in right now. Please try again.");
@@ -74,7 +126,9 @@ function LoginFormInner() {
         setErrorMsg(error.message);
       } else {
         setNeedsConfirmation(false);
-        setInfoMsg("Confirmation email resent. Check your inbox and spam folder.");
+        setInfoMsg(
+          "Confirmation email resent. Check your inbox and spam folder."
+        );
       }
     } finally {
       setSubmitting(false);
@@ -95,6 +149,31 @@ function LoginFormInner() {
             Access your orders, 4-digit handover PINs, and warranty records.
           </p>
         </div>
+
+        {signedInEmail && (
+          <div className="border border-neutral-200 bg-neutral-50 px-3.5 py-3 text-xs text-neutral-700 space-y-2">
+            <p>
+              You are already signed in as{" "}
+              <strong className="text-neutral-950">{signedInEmail}</strong>.
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <Link
+                href={safeNext}
+                className="font-semibold text-[#C81E2B] underline underline-offset-4"
+              >
+                Continue
+              </Link>
+              <button
+                type="button"
+                disabled={signingOut}
+                onClick={handleSwitchAccount}
+                className="font-semibold text-neutral-700 hover:text-neutral-950 underline underline-offset-4 cursor-pointer disabled:opacity-50"
+              >
+                {signingOut ? "Signing out..." : "Sign out to switch accounts"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {errorMsg && (
           <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium space-y-2">
@@ -186,7 +265,7 @@ function LoginFormInner() {
         <div className="pt-4 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-600">
           <span>New to KilaKitu?</span>
           <Link
-            href={`/signup?next=${encodeURIComponent(nextPath)}`}
+            href={buildAuthPath("/signup", safeNext)}
             className="font-semibold text-neutral-950 hover:text-[#C81E2B] underline underline-offset-4"
           >
             Create an account

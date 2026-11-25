@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -36,6 +36,7 @@ export default function CheckoutPage() {
 
   const [authChecked, setAuthChecked] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
 
   const [storeId, setStoreId] = useState<string | null>(null);
   const [storeName, setStoreName] = useState("KilaKitu Electronics");
@@ -60,31 +61,78 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     let active = true;
+    const supabase = createClient();
+
+    function resetUserSpecificState() {
+      activeUserIdRef.current = null;
+      setUserEmail(null);
+      setCustomerName("");
+      setCustomerPhone("");
+      setCustomerWhatsapp("");
+      setDeliveryLandmark("");
+      setDeliveryNotes("");
+      setCreatedOrder(null);
+      setErrorMsg(null);
+    }
+
+    async function loadUserProfile(user: {
+      id: string;
+      email?: string | null;
+      user_metadata?: Record<string, unknown>;
+    }) {
+      const switchedAccount =
+        activeUserIdRef.current !== null && activeUserIdRef.current !== user.id;
+      activeUserIdRef.current = user.id;
+
+      if (switchedAccount) {
+        setCustomerWhatsapp("");
+        setDeliveryLandmark("");
+        setDeliveryNotes("");
+        setCreatedOrder(null);
+        setErrorMsg(null);
+      }
+
+      setUserEmail(user.email ?? null);
+
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("full_name, phone, email")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (!active || activeUserIdRef.current !== user.id) return;
+
+      const metaFullName =
+        typeof user.user_metadata?.full_name === "string"
+          ? user.user_metadata.full_name
+          : typeof user.user_metadata?.name === "string"
+          ? user.user_metadata.name
+          : "";
+      const metaPhone =
+        typeof user.user_metadata?.phone === "string"
+          ? user.user_metadata.phone
+          : "";
+
+      setCustomerName(profile?.full_name?.trim() || metaFullName.trim() || "");
+      setCustomerPhone(profile?.phone?.trim() || metaPhone.trim() || "");
+    }
+
     async function initCheckout() {
       try {
-        const supabase = createClient();
         const {
           data: { user },
         } = await supabase.auth.getUser();
 
         if (!user) {
-          router.replace("/login?next=/checkout");
+          if (active) {
+            resetUserSpecificState();
+          }
+          router.replace("/login?next=%2Fcheckout");
           return;
         }
 
         if (!active) return;
-        setUserEmail(user.email ?? null);
-
-        const { data: profile } = await supabase
-          .from("profiles")
-          .select("full_name, phone, email")
-          .eq("id", user.id)
-          .single();
-
-        if (profile && active) {
-          if (profile.full_name) setCustomerName(profile.full_name);
-          if (profile.phone) setCustomerPhone(profile.phone);
-        }
+        await loadUserProfile(user);
 
         const storeSlug =
           process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
@@ -128,9 +176,41 @@ export default function CheckoutPage() {
       }
     }
 
-    initCheckout();
+    void initCheckout();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        resetUserSpecificState();
+        setAuthChecked(false);
+        router.replace("/login?next=%2Fcheckout");
+        return;
+      }
+
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        window.setTimeout(() => {
+          if (!active) return;
+          void supabase.auth.getUser().then(({ data: { user } }) => {
+            if (!active) return;
+            if (!user) {
+              resetUserSpecificState();
+              setAuthChecked(false);
+              router.replace("/login?next=%2Fcheckout");
+              return;
+            }
+            if (activeUserIdRef.current !== user.id || event === "USER_UPDATED") {
+              void loadUserProfile(user);
+            }
+          });
+        }, 0);
+      }
+    });
+
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [router]);
 
@@ -183,6 +263,16 @@ export default function CheckoutPage() {
     setSubmitting(true);
     try {
       const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      if (!user) {
+        setSubmitting(false);
+        router.replace("/login?next=%2Fcheckout");
+        return;
+      }
+
       const payloadItems = items.map((item) => ({
         product_id: item.productId,
         quantity: item.quantity,

@@ -12,6 +12,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthPath, sanitizeNextPath } from "@/lib/auth/redirects";
 import { useCart } from "./CartContext";
 
 export type NavCategory = {
@@ -51,7 +52,7 @@ function StorefrontNavbarInner({
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { totalCount, openDrawer } = useCart();
+  const { totalCount, openDrawer, closeDrawer } = useCart();
 
   const currentQuery = searchParams.get("q") || searchParams.get("search") || "";
   const activeCategory = searchParams.get("category") || "all";
@@ -79,64 +80,80 @@ function StorefrontNavbarInner({
   useEffect(() => {
     const supabase = createClient();
     let active = true;
+    let syncSeq = 0;
 
     async function syncUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const seq = ++syncSeq;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
 
-      if (!active) return;
+        if (!active || seq !== syncSeq) return;
 
-      if (!user) {
+        if (!user) {
+          setNavUser(null);
+          setAuthReady(true);
+          return;
+        }
+
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, email")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        if (!active || seq !== syncSeq) return;
+
+        const rawName =
+          profile?.full_name?.trim() ||
+          user.user_metadata?.full_name?.trim() ||
+          user.user_metadata?.name?.trim() ||
+          profile?.email?.split("@")[0] ||
+          user.email?.split("@")[0] ||
+          "Account";
+
+        const parts = rawName.split(/\s+/).filter(Boolean);
+        const firstName = parts[0] || "Account";
+        const initials =
+          parts.length >= 2
+            ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
+            : rawName.slice(0, 2).toUpperCase();
+
+        setNavUser({
+          id: user.id,
+          email: user.email ?? null,
+          fullName: rawName,
+          firstName,
+          initials,
+        });
+        setAuthReady(true);
+      } catch {
+        if (!active || seq !== syncSeq) return;
         setNavUser(null);
+        setAuthReady(true);
+      }
+    }
+
+    void syncUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        syncSeq += 1;
+        setNavUser(null);
+        setAccountOpen(false);
         setAuthReady(true);
         return;
       }
 
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name, email")
-        .eq("id", user.id)
-        .single();
-
-      if (!active) return;
-
-      const rawName =
-        profile?.full_name?.trim() ||
-        user.user_metadata?.full_name?.trim() ||
-        profile?.email?.split("@")[0] ||
-        user.email?.split("@")[0] ||
-        "Account";
-
-      const parts = rawName.split(/\s+/).filter(Boolean);
-      const firstName = parts[0] || "Account";
-      const initials =
-        parts.length >= 2
-          ? `${parts[0][0]}${parts[1][0]}`.toUpperCase()
-          : rawName.slice(0, 2).toUpperCase();
-
-      setNavUser({
-        id: user.id,
-        email: user.email ?? null,
-        fullName: rawName,
-        firstName,
-        initials,
-      });
-      setAuthReady(true);
-    }
-
-    syncUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!active) return;
-      if (!session?.user) {
-        setNavUser(null);
-        setAuthReady(true);
-      } else {
-        syncUser();
-      }
+      window.setTimeout(() => {
+        if (active) {
+          void syncUser();
+        }
+      }, 0);
     });
 
     return () => {
@@ -228,13 +245,33 @@ function StorefrontNavbarInner({
       await supabase.auth.signOut();
       setNavUser(null);
       setAccountOpen(false);
+      closeDrawer();
+
+      const isProtectedRoute =
+        pathname?.startsWith("/checkout") ||
+        pathname?.startsWith("/orders") ||
+        pathname?.startsWith("/account") ||
+        pathname?.startsWith("/onboarding");
+
+      if (isProtectedRoute) {
+        router.replace("/");
+      }
       router.refresh();
     } finally {
       setSigningOut(false);
     }
   }
 
-  const encodedNext = encodeURIComponent(pathname || "/");
+  const rawSearch = searchParams.toString();
+  const currentLocation =
+    pathname === "/login" || pathname === "/signup"
+      ? searchParams.get("next") || "/"
+      : rawSearch
+      ? `${pathname || "/"}?${rawSearch}`
+      : pathname || "/";
+  const safeNextForAuth = sanitizeNextPath(currentLocation, "/");
+  const loginHref = buildAuthPath("/login", safeNextForAuth, "/");
+  const signupHref = buildAuthPath("/signup", safeNextForAuth, "/");
   const showDropdown =
     searchFocused &&
     query.trim().length >= 2 &&
@@ -465,14 +502,14 @@ function StorefrontNavbarInner({
                         Sign in to manage orders, warranties, and handover PINs.
                       </p>
                       <Link
-                        href={`/login?next=${encodedNext}`}
+                        href={loginHref}
                         onClick={() => setAccountOpen(false)}
                         className="block w-full py-2 px-3 rounded-md bg-[#C81E2B] hover:bg-[#A61621] text-white text-center text-xs font-semibold transition"
                       >
                         Sign In
                       </Link>
                       <Link
-                        href={`/signup?next=${encodedNext}`}
+                        href={signupHref}
                         onClick={() => setAccountOpen(false)}
                         className="block w-full py-2 px-3 rounded-md border border-neutral-300 hover:border-neutral-950 text-neutral-950 text-center text-xs font-semibold transition"
                       >

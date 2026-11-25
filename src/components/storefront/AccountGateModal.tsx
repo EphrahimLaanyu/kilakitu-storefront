@@ -2,40 +2,59 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { X } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthPath, sanitizeNextPath } from "@/lib/auth/redirects";
+import { syncUserProfile } from "@/lib/auth/profile";
 import { GoogleAuthButton } from "./GoogleAuthButton";
+import { useCart } from "./CartContext";
 
 type GateDetail = {
   nextUrl?: string;
   reason?: string;
 };
 
+const DEFAULT_REASON =
+  "Sign in or create an account to save your order, warranty records, and 4-digit handover PIN.";
+const CART_REASON =
+  "Sign in or create a KilaKitu account to add items to your bag so your orders, warranty records, and 4-digit handover PIN stay linked to your account.";
+const CHECKOUT_REASON =
+  "Sign in or create a KilaKitu account to complete checkout. Your shopping bag items will stay saved.";
+
 export function AccountGateModal() {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [nextUrl, setNextUrl] = useState("/checkout");
-  const [reason, setReason] = useState(
-    "Sign in or create an account to save your order, warranty records, and 4-digit handover PIN."
-  );
+  const pathname = usePathname();
+  const {
+    authGateReason,
+    authGateNextPath,
+    closeAuthGate,
+    commitPendingItem,
+    openDrawer,
+  } = useCart();
+
+  const [eventOpen, setEventOpen] = useState(false);
+  const [eventNextUrl, setEventNextUrl] = useState("/checkout");
+  const [eventReason, setEventReason] = useState(DEFAULT_REASON);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [needsConfirmation, setNeedsConfirmation] = useState(false);
 
   useEffect(() => {
     function handleGateEvent(event: Event) {
       const customEvent = event as CustomEvent<GateDetail>;
-      if (customEvent.detail?.nextUrl) {
-        setNextUrl(customEvent.detail.nextUrl);
-      }
-      if (customEvent.detail?.reason) {
-        setReason(customEvent.detail.reason);
-      }
+      setEventNextUrl(
+        sanitizeNextPath(customEvent.detail?.nextUrl, "/checkout")
+      );
+      setEventReason(customEvent.detail?.reason || DEFAULT_REASON);
       setErrorMsg(null);
-      setOpen(true);
+      setInfoMsg(null);
+      setNeedsConfirmation(false);
+      setEventOpen(true);
     }
 
     window.addEventListener("kilakitu:account-gate", handleGateEvent);
@@ -43,37 +62,114 @@ export function AccountGateModal() {
       window.removeEventListener("kilakitu:account-gate", handleGateEvent);
   }, []);
 
+  const isContextOpen = authGateReason !== null;
+  const open = isContextOpen || eventOpen;
+
+  useEffect(() => {
+    if (open) {
+      setErrorMsg(null);
+      setInfoMsg(null);
+      setNeedsConfirmation(false);
+    }
+  }, [open]);
+
   if (!open) return null;
 
-  const safeNext = nextUrl.startsWith("/") ? nextUrl : "/";
-  const encodedNext = encodeURIComponent(safeNext);
+  const safeNext = sanitizeNextPath(
+    isContextOpen ? authGateNextPath : eventNextUrl,
+    "/checkout"
+  );
+  const reasonText = isContextOpen
+    ? authGateReason === "cart"
+      ? CART_REASON
+      : CHECKOUT_REASON
+    : eventReason;
+
+  function handleClose() {
+    setEventOpen(false);
+    setPassword("");
+    setErrorMsg(null);
+    setInfoMsg(null);
+    setNeedsConfirmation(false);
+    closeAuthGate();
+  }
 
   async function handleInlineLogin(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
+    setInfoMsg(null);
+    setNeedsConfirmation(false);
     setSubmitting(true);
 
     try {
       const supabase = createClient();
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
       });
 
       if (error) {
+        if (error.message.toLowerCase().includes("email not confirmed")) {
+          setNeedsConfirmation(true);
+        }
         setErrorMsg(error.message);
         setSubmitting(false);
         return;
       }
 
-      setOpen(false);
+      const {
+        data: { user: verifiedUser },
+      } = await supabase.auth.getUser();
+      const activeUser = verifiedUser ?? data.user;
+
+      if (activeUser) {
+        await syncUserProfile(supabase, activeUser);
+      }
+
+      const addedPending = authGateReason === "cart" && commitPendingItem();
+
+      setEventOpen(false);
+      setEmail("");
+      setPassword("");
       setSubmitting(false);
+      closeAuthGate();
       router.refresh();
-      if (safeNext === "/checkout") {
-        router.push("/checkout");
+
+      if (addedPending) {
+        openDrawer();
+      } else if (safeNext && safeNext !== pathname) {
+        router.push(safeNext);
       }
     } catch {
       setErrorMsg("Unable to sign in right now. Please try again.");
+      setSubmitting(false);
+    }
+  }
+
+  async function handleResendConfirmation() {
+    if (!email.trim()) return;
+    setSubmitting(true);
+    setErrorMsg(null);
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.resend({
+        type: "signup",
+        email: email.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
+            safeNext
+          )}`,
+        },
+      });
+      if (error) {
+        setErrorMsg(error.message);
+      } else {
+        setNeedsConfirmation(false);
+        setInfoMsg(
+          "Confirmation email resent. Check your inbox and spam folder."
+        );
+      }
+    } finally {
       setSubmitting(false);
     }
   }
@@ -92,7 +188,7 @@ export function AccountGateModal() {
           </div>
           <button
             type="button"
-            onClick={() => setOpen(false)}
+            onClick={handleClose}
             aria-label="Close modal"
             className="p-1 text-neutral-400 hover:text-neutral-950 cursor-pointer"
           >
@@ -100,11 +196,26 @@ export function AccountGateModal() {
           </button>
         </div>
 
-        <p className="text-xs text-neutral-600 leading-relaxed">{reason}</p>
+        <p className="text-xs text-neutral-600 leading-relaxed">{reasonText}</p>
 
         {errorMsg && (
-          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium">
-            {errorMsg}
+          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium space-y-2">
+            <p>{errorMsg}</p>
+            {needsConfirmation && (
+              <button
+                type="button"
+                onClick={handleResendConfirmation}
+                className="underline underline-offset-4 font-semibold text-neutral-950 cursor-pointer"
+              >
+                Resend confirmation email
+              </button>
+            )}
+          </div>
+        )}
+
+        {infoMsg && (
+          <div className="border-l-2 border-neutral-950 bg-neutral-50 px-3.5 py-2.5 text-xs text-neutral-800">
+            {infoMsg}
           </div>
         )}
 
@@ -148,7 +259,7 @@ export function AccountGateModal() {
               </label>
               <Link
                 href="/forgot-password"
-                onClick={() => setOpen(false)}
+                onClick={handleClose}
                 className="text-[11px] font-medium text-neutral-500 hover:text-neutral-950 underline underline-offset-4"
               >
                 Forgot?
@@ -175,11 +286,17 @@ export function AccountGateModal() {
           </button>
         </form>
 
-        <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-600">
-          <span>New to KilaKitu?</span>
+        <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-600 gap-3">
           <Link
-            href={`/signup?next=${encodedNext}`}
-            onClick={() => setOpen(false)}
+            href={buildAuthPath("/login", safeNext, "/checkout")}
+            onClick={handleClose}
+            className="font-medium text-neutral-600 hover:text-neutral-950 underline underline-offset-4"
+          >
+            Full sign-in page
+          </Link>
+          <Link
+            href={buildAuthPath("/signup", safeNext, "/checkout")}
+            onClick={handleClose}
             className="font-semibold text-neutral-950 hover:text-[#C81E2B] underline underline-offset-4"
           >
             Create an account

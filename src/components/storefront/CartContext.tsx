@@ -6,9 +6,11 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { sanitizeNextPath } from "@/lib/auth/redirects";
 
 export type CartItem = {
   productId: string;
@@ -22,7 +24,12 @@ export type CartItem = {
   quantity: number;
 };
 
-type AuthGateReason = "cart" | "checkout" | null;
+export type AuthGateReason = "cart" | "checkout" | null;
+
+type PendingCartAdd = {
+  item: Omit<CartItem, "quantity">;
+  quantity: number;
+};
 
 type CartContextValue = {
   items: CartItem[];
@@ -36,9 +43,13 @@ type CartContextValue = {
   hasBulkyItem: boolean;
   openDrawer: () => void;
   closeDrawer: () => void;
-  openAuthGate: (reason: Exclude<AuthGateReason, null>, nextPath?: string) => void;
+  openAuthGate: (
+    reason: Exclude<AuthGateReason, null>,
+    nextPath?: string
+  ) => void;
   closeAuthGate: () => void;
   addItem: (item: Omit<CartItem, "quantity">, qty?: number) => boolean;
+  commitPendingItem: () => boolean;
   updateQuantity: (productId: string, quantity: number) => void;
   removeItem: (productId: string) => void;
   clearCart: () => void;
@@ -55,6 +66,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const [authLoading, setAuthLoading] = useState(true);
   const [authGateReason, setAuthGateReason] = useState<AuthGateReason>(null);
   const [authGateNextPath, setAuthGateNextPath] = useState("/checkout");
+  const pendingAddRef = useRef<PendingCartAdd | null>(null);
+
+  const appendCartItem = useCallback(
+    (incoming: Omit<CartItem, "quantity">, qty = 1) => {
+      const safeQty = Math.max(1, Math.round(qty));
+      setItems((prev) => {
+        const idx = prev.findIndex((i) => i.productId === incoming.productId);
+        if (idx > -1) {
+          const next = [...prev];
+          next[idx] = {
+            ...next[idx],
+            quantity: next[idx].quantity + safeQty,
+          };
+          return next;
+        }
+        return [...prev, { ...incoming, quantity: safeQty }];
+      });
+    },
+    []
+  );
 
   useEffect(() => {
     try {
@@ -82,22 +113,51 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const supabase = createClient();
     let active = true;
+    let verifySeq = 0;
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!active) return;
-      setIsAuthenticated(Boolean(user));
-      setAuthLoading(false);
-    });
+    async function verifyAuthUser() {
+      const seq = ++verifySeq;
+      try {
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        if (!active || seq !== verifySeq) return;
+        const signedIn = Boolean(user);
+        setIsAuthenticated(signedIn);
+        setAuthLoading(false);
+        if (signedIn) {
+          setAuthGateReason(null);
+        }
+      } catch {
+        if (!active || seq !== verifySeq) return;
+        setIsAuthenticated(false);
+        setAuthLoading(false);
+      }
+    }
+
+    void verifyAuthUser();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange((event) => {
       if (!active) return;
-      setIsAuthenticated(Boolean(session?.user));
-      setAuthLoading(false);
-      if (session?.user) {
+
+      if (event === "SIGNED_OUT") {
+        verifySeq += 1;
+        pendingAddRef.current = null;
+        setIsAuthenticated(false);
+        setAuthLoading(false);
         setAuthGateReason(null);
+        setIsDrawerOpen(false);
+        return;
       }
+
+      // Defer getUser() out of onAuthStateChange callback to avoid auth lock contention.
+      window.setTimeout(() => {
+        if (active) {
+          void verifyAuthUser();
+        }
+      }, 0);
     });
 
     return () => {
@@ -111,38 +171,63 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const openAuthGate = useCallback(
     (reason: Exclude<AuthGateReason, null>, nextPath = "/checkout") => {
-      setAuthGateNextPath(nextPath);
+      setAuthGateNextPath(sanitizeNextPath(nextPath, "/checkout"));
       setAuthGateReason(reason);
     },
     []
   );
 
-  const closeAuthGate = useCallback(() => setAuthGateReason(null), []);
+  const closeAuthGate = useCallback(() => {
+    pendingAddRef.current = null;
+    setAuthGateReason(null);
+  }, []);
+
+  const commitPendingItem = useCallback(() => {
+    const pending = pendingAddRef.current;
+    if (!pending) return false;
+    pendingAddRef.current = null;
+    appendCartItem(pending.item, pending.quantity);
+    return true;
+  }, [appendCartItem]);
 
   const addItem = useCallback(
     (incoming: Omit<CartItem, "quantity">, qty = 1) => {
-      if (!authLoading && !isAuthenticated) {
-        setAuthGateNextPath(`/products/${incoming.slug}`);
+      const safeQty = Math.max(1, Math.round(qty));
+
+      if (authLoading) {
+        const supabase = createClient();
+        void supabase.auth.getUser().then(({ data: { user } }) => {
+          if (user) {
+            setIsAuthenticated(true);
+            setAuthLoading(false);
+            appendCartItem(incoming, safeQty);
+            setIsDrawerOpen(true);
+          } else {
+            setIsAuthenticated(false);
+            setAuthLoading(false);
+            pendingAddRef.current = { item: incoming, quantity: safeQty };
+            setAuthGateNextPath(
+              sanitizeNextPath(`/products/${incoming.slug}`, "/")
+            );
+            setAuthGateReason("cart");
+          }
+        });
+        return false;
+      }
+
+      if (!isAuthenticated) {
+        pendingAddRef.current = { item: incoming, quantity: safeQty };
+        setAuthGateNextPath(
+          sanitizeNextPath(`/products/${incoming.slug}`, "/")
+        );
         setAuthGateReason("cart");
         return false;
       }
 
-      const safeQty = Math.max(1, Math.round(qty));
-      setItems((prev) => {
-        const idx = prev.findIndex((i) => i.productId === incoming.productId);
-        if (idx > -1) {
-          const next = [...prev];
-          next[idx] = {
-            ...next[idx],
-            quantity: next[idx].quantity + safeQty,
-          };
-          return next;
-        }
-        return [...prev, { ...incoming, quantity: safeQty }];
-      });
+      appendCartItem(incoming, safeQty);
       return true;
     },
-    [authLoading, isAuthenticated]
+    [authLoading, isAuthenticated, appendCartItem]
   );
 
   const updateQuantity = useCallback((productId: string, quantity: number) => {
@@ -191,6 +276,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       openAuthGate,
       closeAuthGate,
       addItem,
+      commitPendingItem,
       updateQuantity,
       removeItem,
       clearCart,
@@ -210,6 +296,7 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       openAuthGate,
       closeAuthGate,
       addItem,
+      commitPendingItem,
       updateQuantity,
       removeItem,
       clearCart,

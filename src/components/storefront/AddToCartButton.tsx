@@ -32,7 +32,7 @@ export function AddToCartButton({
 
   function handleAdd() {
     if (disabled) return;
-    addItem(
+    const didAdd = addItem(
       {
         productId,
         slug,
@@ -45,6 +45,8 @@ export function AddToCartButton({
       },
       1
     );
+    if (!didAdd) return;
+
     setAdded(true);
     openDrawer();
     window.setTimeout(() => setAdded(false), 1400);

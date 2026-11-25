@@ -34,15 +34,30 @@ function AccountSettingsInner() {
 
   useEffect(() => {
     let active = true;
+    const supabase = createClient();
+
+    function resetAccountState() {
+      setUserId(null);
+      setProvider("email");
+      setFullName("");
+      setPhone("");
+      setCurrentEmail("");
+      setNewEmail("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setNotice(null);
+      setLoading(true);
+    }
+
     async function loadAccount() {
-      const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!active) return;
       if (!user) {
-        router.replace("/login?next=/account");
+        resetAccountState();
+        router.replace("/login?next=%2Faccount");
         return;
       }
 
@@ -55,7 +70,7 @@ function AccountSettingsInner() {
         .from("profiles")
         .select("full_name, phone")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!active) return;
       setFullName(
@@ -68,9 +83,30 @@ function AccountSettingsInner() {
       setLoading(false);
     }
 
-    loadAccount();
+    void loadAccount();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        resetAccountState();
+        router.replace("/login?next=%2Faccount");
+        return;
+      }
+
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        window.setTimeout(() => {
+          if (active) {
+            void loadAccount();
+          }
+        }, 0);
+      }
+    });
+
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [router]);
 

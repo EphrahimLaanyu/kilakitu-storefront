@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowLeft, KeyRound, Truck, Package, Radio } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthPath } from "@/lib/auth/redirects";
 
 type CustomerOrderItem = {
   id: string;
@@ -41,8 +42,11 @@ export default function MyOrdersPage() {
   const [orders, setOrders] = useState<CustomerOrderRow[]>([]);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
+  const activeUserIdRef = useRef<string | null>(null);
+  const fetchSeqRef = useRef(0);
 
   const fetchOrdersForUser = useCallback(async (uid: string) => {
+    const seq = ++fetchSeqRef.current;
     const supabase = createClient();
     const { data: orderRows } = await supabase
       .from("orders")
@@ -51,6 +55,10 @@ export default function MyOrdersPage() {
       )
       .eq("customer_user_id", uid)
       .order("created_at", { ascending: false });
+
+    if (seq !== fetchSeqRef.current || activeUserIdRef.current !== uid) {
+      return;
+    }
 
     const list = orderRows ?? [];
     if (list.length === 0) {
@@ -66,6 +74,10 @@ export default function MyOrdersPage() {
         "id, order_id, product_name, quantity, unit_price_kes, line_total_kes, warranty_summary, serial_numbers"
       )
       .in("order_id", ids);
+
+    if (seq !== fetchSeqRef.current || activeUserIdRef.current !== uid) {
+      return;
+    }
 
     const byOrder = new Map<string, CustomerOrderItem[]>();
     for (const item of itemRows ?? []) {
@@ -87,32 +99,84 @@ export default function MyOrdersPage() {
     let active = true;
     const supabase = createClient();
 
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
+    function resetOrdersState() {
+      fetchSeqRef.current += 1;
+      activeUserIdRef.current = null;
+      setUserId(null);
+      setOrders([]);
+      setPayingOrderId(null);
+      setPayError(null);
+      setLoading(true);
+    }
+
+    async function syncOrdersSession(checkPaymentCallback: boolean) {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
       if (!active) return;
       if (!user) {
-        router.replace("/login?next=/orders");
+        resetOrdersState();
+        const currentNext = `${window.location.pathname}${window.location.search}`;
+        router.replace(buildAuthPath("/login", currentNext, "/orders"));
         return;
       }
-      setUserId(user.id);
 
-      const urlParams = new URLSearchParams(window.location.search);
-      const ref = urlParams.get("reference") || urlParams.get("trxref");
-      if (ref) {
-        await fetch("/api/payments/paystack/verify", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ reference: ref }),
-        }).catch(() => null);
-        window.history.replaceState({}, "", "/orders");
+      const switchedAccount =
+        activeUserIdRef.current !== null && activeUserIdRef.current !== user.id;
+      activeUserIdRef.current = user.id;
+
+      if (switchedAccount) {
+        setOrders([]);
+        setPayError(null);
+        setPayingOrderId(null);
+        setLoading(true);
       }
 
-      if (active) {
+      setUserId(user.id);
+
+      if (checkPaymentCallback) {
+        const urlParams = new URLSearchParams(window.location.search);
+        const ref = urlParams.get("reference") || urlParams.get("trxref");
+        if (ref) {
+          await fetch("/api/payments/paystack/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ reference: ref }),
+          }).catch(() => null);
+          window.history.replaceState({}, "", "/orders");
+        }
+      }
+
+      if (active && activeUserIdRef.current === user.id) {
         await fetchOrdersForUser(user.id);
+      }
+    }
+
+    void syncOrdersSession(true);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        resetOrdersState();
+        router.replace("/login?next=%2Forders");
+        return;
+      }
+
+      if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        window.setTimeout(() => {
+          if (active) {
+            void syncOrdersSession(false);
+          }
+        }, 0);
       }
     });
 
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [router, fetchOrdersForUser]);
 

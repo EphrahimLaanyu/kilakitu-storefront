@@ -3,12 +3,12 @@
 import { FormEvent, Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { buildAuthPath, sanitizeNextPath } from "@/lib/auth/redirects";
 
 function OnboardingInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = searchParams.get("next") || "/checkout";
-  const safeNext = nextPath.startsWith("/") ? nextPath : "/checkout";
+  const safeNext = sanitizeNextPath(searchParams.get("next"), "/checkout");
 
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -20,15 +20,25 @@ function OnboardingInner() {
 
   useEffect(() => {
     let active = true;
+    const supabase = createClient();
+
+    function resetState() {
+      setUserId(null);
+      setEmail("");
+      setFullName("");
+      setPhone("");
+      setErrorMsg(null);
+    }
+
     async function loadUser() {
-      const supabase = createClient();
       const {
         data: { user },
       } = await supabase.auth.getUser();
 
       if (!active) return;
       if (!user) {
-        router.replace(`/login?next=${encodeURIComponent(safeNext)}`);
+        resetState();
+        router.replace(buildAuthPath("/login", safeNext, "/checkout"));
         return;
       }
 
@@ -39,7 +49,7 @@ function OnboardingInner() {
         .from("profiles")
         .select("full_name, phone")
         .eq("id", user.id)
-        .single();
+        .maybeSingle();
 
       if (!active) return;
       setFullName(
@@ -53,8 +63,24 @@ function OnboardingInner() {
     }
 
     loadUser();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (!active) return;
+      if (event === "SIGNED_OUT") {
+        resetState();
+        router.replace(buildAuthPath("/login", safeNext, "/checkout"));
+      } else if (event === "SIGNED_IN" || event === "USER_UPDATED") {
+        window.setTimeout(() => {
+          if (active) void loadUser();
+        }, 0);
+      }
+    });
+
     return () => {
       active = false;
+      subscription.unsubscribe();
     };
   }, [router, safeNext]);
 
@@ -88,7 +114,7 @@ function OnboardingInner() {
         return;
       }
 
-      router.push(safeNext);
+      router.replace(safeNext);
       router.refresh();
     } catch {
       setErrorMsg("Could not save your profile. Please try again.");

@@ -1,7 +1,10 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { X, Plus, Minus, Trash2 } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 import { useCart } from "./CartContext";
 
 function formatKes(amount: number) {
@@ -9,18 +12,51 @@ function formatKes(amount: number) {
 }
 
 export function CartDrawer() {
+  const router = useRouter();
+  const [checkingOut, setCheckingOut] = useState(false);
   const {
     items,
     isDrawerOpen,
+    isAuthenticated,
+    authLoading,
     totalCount,
     subtotalKes,
     hasBulkyItem,
     closeDrawer,
+    openAuthGate,
     updateQuantity,
     removeItem,
   } = useCart();
 
   if (!isDrawerOpen) return null;
+
+  async function handleProceedToCheckout() {
+    if (checkingOut) return;
+
+    if (!authLoading && !isAuthenticated) {
+      closeDrawer();
+      openAuthGate("checkout", "/checkout");
+      return;
+    }
+
+    setCheckingOut(true);
+    try {
+      const supabase = createClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+
+      closeDrawer();
+      if (!user) {
+        openAuthGate("checkout", "/checkout");
+        return;
+      }
+
+      router.push("/checkout");
+    } finally {
+      setCheckingOut(false);
+    }
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-neutral-950/45 backdrop-blur-[1px]">
@@ -171,13 +207,14 @@ export function CartDrawer() {
               )}
             </div>
 
-            <Link
-              href="/checkout"
-              onClick={closeDrawer}
-              className="block w-full py-3.5 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] text-white text-center text-xs sm:text-sm font-semibold tracking-wide transition-colors"
+            <button
+              type="button"
+              disabled={checkingOut}
+              onClick={handleProceedToCheckout}
+              className="block w-full py-3.5 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] disabled:opacity-60 text-white text-center text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer"
             >
-              Proceed to Checkout
-            </Link>
+              {checkingOut ? "Checking account..." : "Proceed to Checkout"}
+            </button>
           </div>
         )}
       </div>
