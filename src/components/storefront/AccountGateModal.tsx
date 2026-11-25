@@ -1,78 +1,188 @@
 "use client";
 
+import { FormEvent, useEffect, useState } from "react";
 import Link from "next/link";
-import { X, ShieldCheck, LogIn, UserPlus } from "lucide-react";
-import { useCart } from "./CartContext";
+import { useRouter } from "next/navigation";
+import { X } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
+import { GoogleAuthButton } from "./GoogleAuthButton";
+
+type GateDetail = {
+  nextUrl?: string;
+  reason?: string;
+};
 
 export function AccountGateModal() {
-  const { authGateReason, authGateNextPath, closeAuthGate } = useCart();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [nextUrl, setNextUrl] = useState("/checkout");
+  const [reason, setReason] = useState(
+    "Sign in or create an account to save your order, warranty records, and 4-digit handover PIN."
+  );
 
-  if (!authGateReason) return null;
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const isCartAction = authGateReason === "cart";
-  const loginHref = `/login?next=${encodeURIComponent(authGateNextPath)}`;
-  const signupHref = `/signup?next=${encodeURIComponent(authGateNextPath)}`;
+  useEffect(() => {
+    function handleGateEvent(event: Event) {
+      const customEvent = event as CustomEvent<GateDetail>;
+      if (customEvent.detail?.nextUrl) {
+        setNextUrl(customEvent.detail.nextUrl);
+      }
+      if (customEvent.detail?.reason) {
+        setReason(customEvent.detail.reason);
+      }
+      setErrorMsg(null);
+      setOpen(true);
+    }
+
+    window.addEventListener("kilakitu:account-gate", handleGateEvent);
+    return () =>
+      window.removeEventListener("kilakitu:account-gate", handleGateEvent);
+  }, []);
+
+  if (!open) return null;
+
+  const safeNext = nextUrl.startsWith("/") ? nextUrl : "/";
+  const encodedNext = encodeURIComponent(safeNext);
+
+  async function handleInlineLogin(e: FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setErrorMsg(null);
+    setSubmitting(true);
+
+    try {
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+
+      if (error) {
+        setErrorMsg(error.message);
+        setSubmitting(false);
+        return;
+      }
+
+      setOpen(false);
+      setSubmitting(false);
+      router.refresh();
+      if (safeNext === "/checkout") {
+        router.push("/checkout");
+      }
+    } catch {
+      setErrorMsg("Unable to sign in right now. Please try again.");
+      setSubmitting(false);
+    }
+  }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4">
-      <div className="w-full max-w-md bg-white border border-slate-200 rounded-2xl p-6 shadow-2xl space-y-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="h-10 w-10 rounded-xl bg-teal-50 border border-teal-200 text-teal-700 flex items-center justify-center shrink-0">
-              <ShieldCheck className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-base font-bold text-slate-900">
-                Account Required to {isCartAction ? "Add to Cart" : "Checkout"}
-              </h2>
-              <p className="text-xs text-slate-500">
-                Sign in or create an account in under a minute.
-              </p>
-            </div>
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-neutral-950/50 backdrop-blur-[1px]">
+      <div className="w-full max-w-md bg-white border border-neutral-200 rounded-lg p-6 sm:p-7 space-y-5 shadow-xl">
+        <div className="flex items-start justify-between gap-4 border-b border-neutral-100 pb-4">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[#C81E2B]">
+              Account Required
+            </p>
+            <h2 className="text-lg font-semibold text-neutral-950 mt-1">
+              Sign in to continue
+            </h2>
           </div>
-
           <button
             type="button"
-            onClick={closeAuthGate}
-            className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700 cursor-pointer"
+            onClick={() => setOpen(false)}
             aria-label="Close modal"
+            className="p-1 text-neutral-400 hover:text-neutral-950 cursor-pointer"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 space-y-1.5">
-          <p className="font-semibold text-slate-900">
-            Why we require an account on KilaKitu:
-          </p>
-          <p>
-            • Keeps your warranty details, device serial/IMEI records, and 4-digit handover PIN tied to your order.
-          </p>
-          <p>
-            • Lets you view all past and active orders anytime under My Orders.
-          </p>
-          <p className="text-slate-500 pt-0.5">
-            Already have a KilaKitu merchant or staff account? You can sign in with that same login.
-          </p>
+        <p className="text-xs text-neutral-600 leading-relaxed">{reason}</p>
+
+        {errorMsg && (
+          <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-3.5 py-2.5 text-xs text-[#C81E2B] font-medium">
+            {errorMsg}
+          </div>
+        )}
+
+        <GoogleAuthButton nextPath={safeNext} label="Continue with Google" />
+
+        <div className="relative flex items-center py-0.5">
+          <div className="flex-grow border-t border-neutral-200" />
+          <span className="px-3 text-[10px] uppercase tracking-widest text-neutral-400">
+            or email
+          </span>
+          <div className="flex-grow border-t border-neutral-200" />
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <Link
-            href={loginHref}
-            onClick={closeAuthGate}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold transition"
-          >
-            <LogIn className="h-4 w-4" />
-            <span>Log In</span>
-          </Link>
+        <form onSubmit={handleInlineLogin} className="space-y-4">
+          <div className="space-y-1">
+            <label
+              htmlFor="modal-login-email"
+              className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500"
+            >
+              Email Address
+            </label>
+            <input
+              id="modal-login-email"
+              type="email"
+              required
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@example.com"
+              className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-1.5 text-sm text-neutral-950 focus:outline-none"
+            />
+          </div>
 
-          <Link
-            href={signupHref}
-            onClick={closeAuthGate}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-900 text-xs font-bold transition"
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label
+                htmlFor="modal-login-password"
+                className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500"
+              >
+                Password
+              </label>
+              <Link
+                href="/forgot-password"
+                onClick={() => setOpen(false)}
+                className="text-[11px] font-medium text-neutral-500 hover:text-neutral-950 underline underline-offset-4"
+              >
+                Forgot?
+              </Link>
+            </div>
+            <input
+              id="modal-login-password"
+              type="password"
+              required
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="••••••••"
+              className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-1.5 text-sm text-neutral-950 focus:outline-none"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full py-3 px-4 rounded-md bg-[#C81E2B] hover:bg-[#A61621] disabled:opacity-50 text-white text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer"
           >
-            <UserPlus className="h-4 w-4 text-teal-700" />
-            <span>Create Account</span>
+            {submitting ? "Signing in..." : "Sign In"}
+          </button>
+        </form>
+
+        <div className="pt-3 border-t border-neutral-100 flex items-center justify-between text-xs text-neutral-600">
+          <span>New to KilaKitu?</span>
+          <Link
+            href={`/signup?next=${encodedNext}`}
+            onClick={() => setOpen(false)}
+            className="font-semibold text-neutral-950 hover:text-[#C81E2B] underline underline-offset-4"
+          >
+            Create an account
           </Link>
         </div>
       </div>

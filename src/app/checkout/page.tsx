@@ -3,28 +3,10 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  ArrowLeft,
-  CheckCircle2,
-  AlertCircle,
-  KeyRound,
-  ShieldCheck,
-  Smartphone,
-  XCircle,
-} from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useCart } from "@/components/storefront/CartContext";
-
-type ZoneOption = {
-  id: string;
-  name: string;
-  description: string | null;
-  fulfillment_type: string;
-  fee_kes: number;
-  bulky_surcharge_kes: number;
-  estimated_delivery_text: string;
-  cutoff_time_text: string | null;
-};
+import type { StorefrontDeliveryZone } from "@/lib/db/storefront";
 
 function formatKes(amount: number) {
   return `KES ${amount.toLocaleString("en-KE")}`;
@@ -51,7 +33,7 @@ export default function CheckoutPage() {
 
   const [storeId, setStoreId] = useState<string | null>(null);
   const [storeName, setStoreName] = useState("KilaKitu Electronics");
-  const [zones, setZones] = useState<ZoneOption[]>([]);
+  const [zones, setZones] = useState<StorefrontDeliveryZone[]>([]);
   const [loadingZones, setLoadingZones] = useState(true);
 
   const [customerName, setCustomerName] = useState("");
@@ -65,13 +47,10 @@ export default function CheckoutPage() {
   >("mpesa_stk");
 
   const [submitting, setSubmitting] = useState(false);
-  const [simulatingPayment, setSimulatingPayment] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [createdOrder, setCreatedOrder] = useState<CreatedOrderSummary | null>(
     null
   );
-  const [activeTxId, setActiveTxId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -130,7 +109,7 @@ export default function CheckoutPage() {
           .order("sort_order", { ascending: true });
 
         if (!active) return;
-        const list = (zoneRows ?? []) as ZoneOption[];
+        const list = (zoneRows ?? []) as StorefrontDeliveryZone[];
         setZones(list);
         if (list.length > 0) {
           setSelectedZoneId(list[0].id);
@@ -162,14 +141,13 @@ export default function CheckoutPage() {
   async function handlePlaceOrder(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setErrorMsg(null);
-    setPaymentNotice(null);
 
     if (!storeId) {
       setErrorMsg("Store configuration could not be loaded.");
       return;
     }
     if (items.length === 0) {
-      setErrorMsg("Your cart is empty.");
+      setErrorMsg("Your bag is empty.");
       return;
     }
     if (!selectedZoneId) {
@@ -204,37 +182,8 @@ export default function CheckoutPage() {
         return;
       }
 
-      const orderSummary = data as CreatedOrderSummary;
-      setCreatedOrder(orderSummary);
+      setCreatedOrder(data as CreatedOrderSummary);
       clearCart();
-
-      if (paymentMethod === "mpesa_stk") {
-        const checkoutReqId = `LOCAL-STK-${Date.now()}`;
-        const { data: txRow } = await supabase
-          .from("payment_transactions")
-          .insert({
-            order_id: orderSummary.order_id,
-            provider: "mpesa_daraja_local_demo",
-            checkout_request_id: checkoutReqId,
-            merchant_request_id: `MR-${Date.now()}`,
-            phone_number: customerPhone.trim(),
-            amount_kes: orderSummary.total_kes,
-            status: "pending",
-            raw_payload: { mode: "local_demo_no_daraja" },
-          })
-          .select("id")
-          .single();
-
-        if (txRow?.id) {
-          setActiveTxId(txRow.id);
-        }
-        setPaymentNotice(
-          `Local Demo M-Pesa prompt initiated for ${customerPhone.trim()} (${formatKes(
-            orderSummary.total_kes
-          )}). Use the demo buttons below to simulate payment confirmation or failure.`
-        );
-      }
-
       setSubmitting(false);
     } catch {
       setErrorMsg("Unexpected error placing order. Please try again.");
@@ -242,291 +191,201 @@ export default function CheckoutPage() {
     }
   }
 
-  async function handleSimulateDemoPayment(outcome: "success" | "failed") {
-    if (!createdOrder) return;
-    setSimulatingPayment(true);
-    setErrorMsg(null);
-
-    try {
-      const supabase = createClient();
-      const receiptCode =
-        outcome === "success"
-          ? `DEMO${Math.floor(10000000 + Math.random() * 90000000)}`
-          : null;
-
-      if (activeTxId) {
-        await supabase
-          .from("payment_transactions")
-          .update({
-            status: outcome === "success" ? "success" : "failed",
-            provider_reference: receiptCode,
-            failure_reason:
-              outcome === "failed"
-                ? "Simulated local demo cancellation/timeout"
-                : null,
-          })
-          .eq("id", activeTxId);
-      }
-
-      if (outcome === "success") {
-        await supabase
-          .from("orders")
-          .update({
-            payment_status: "paid",
-            paid_at: new Date().toISOString(),
-          })
-          .eq("id", createdOrder.order_id);
-
-        setCreatedOrder({
-          ...createdOrder,
-          payment_status: "paid",
-        });
-        setPaymentNotice(
-          `Demo payment confirmed! Receipt: ${receiptCode}. Order payment_status is now PAID.`
-        );
-      } else {
-        await supabase
-          .from("orders")
-          .update({
-            payment_status: "failed",
-          })
-          .eq("id", createdOrder.order_id);
-
-        setCreatedOrder({
-          ...createdOrder,
-          payment_status: "failed",
-        });
-        setPaymentNotice(
-          "Demo payment marked as FAILED. You can still inspect the order or retry later."
-        );
-      }
-    } finally {
-      setSimulatingPayment(false);
-    }
-  }
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+    <main className="bg-white min-h-screen">
+      <div className="max-w-6xl mx-auto px-4 sm:px-8 pt-6 pb-20">
+        <div className="flex items-center justify-between gap-4 pb-6 border-b border-neutral-200 text-xs">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-900"
+            className="inline-flex items-center gap-2 font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-3.5 w-3.5" />
             <span>Back to Catalog</span>
           </Link>
-          <span className="text-xs font-semibold text-teal-700">
-            Checkout • {storeName}
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-neutral-500">
+            {storeName}
           </span>
         </div>
-      </header>
 
-      <main className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
         {!authChecked ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center text-sm text-slate-500 max-w-md mx-auto">
-            Checking account session...
+          <div className="py-16 text-center text-sm text-neutral-500">
+            Verifying account session...
           </div>
         ) : createdOrder ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 sm:p-8 max-w-2xl mx-auto space-y-5">
-            <div className="flex items-center gap-3 text-emerald-700">
-              <CheckCircle2 className="h-7 w-7 shrink-0" />
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">
-                  Order Placed Successfully!
-                </h1>
-                <p className="text-xs text-slate-600">
-                  Saved to your account for {storeName} • Payment status:{" "}
-                  <strong className="uppercase">
-                    {createdOrder.payment_status}
-                  </strong>
-                </p>
-              </div>
+          <div className="max-w-2xl mx-auto pt-10 space-y-6">
+            <div className="border-b border-neutral-200 pb-5 space-y-1">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#C81E2B]">
+                Order Confirmed
+              </p>
+              <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950">
+                Thank you for your order
+              </h1>
+              <p className="text-xs text-neutral-500">
+                Recorded under {storeName} and linked to your account.
+              </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 border border-slate-200 rounded-xl p-4">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+            <div className="grid grid-cols-1 sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-neutral-200 border border-neutral-200">
+              <div className="p-5">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
                   Order Number
                 </p>
-                <p className="text-lg font-extrabold text-slate-900 mt-0.5">
+                <p className="text-lg font-semibold text-neutral-950 mt-1 tabular-nums">
                   {createdOrder.order_number}
                 </p>
               </div>
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">
+              <div className="p-5">
+                <p className="text-[11px] font-medium uppercase tracking-wider text-neutral-500">
                   4-Digit Handover PIN
                 </p>
-                <p className="inline-flex items-center gap-1.5 text-lg font-extrabold text-teal-800 mt-0.5">
-                  <KeyRound className="h-4 w-4" />
-                  <span>{createdOrder.delivery_code}</span>
+                <p className="text-lg font-semibold text-[#C81E2B] mt-1 tabular-nums tracking-widest">
+                  {createdOrder.delivery_code}
                 </p>
               </div>
             </div>
 
-            {paymentNotice && (
-              <div className="rounded-xl bg-amber-50/80 border border-amber-200 p-4 space-y-3 text-xs text-amber-950">
-                <div className="flex items-start gap-2">
-                  <Smartphone className="h-4 w-4 text-amber-800 shrink-0 mt-0.5" />
-                  <span>{paymentNotice}</span>
-                </div>
-
-                {createdOrder.payment_status !== "paid" && (
-                  <div className="flex flex-wrap gap-2.5 pt-1">
-                    <button
-                      type="button"
-                      disabled={simulatingPayment}
-                      onClick={() => handleSimulateDemoPayment("success")}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold cursor-pointer"
-                    >
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      <span>Simulate M-Pesa Paid</span>
-                    </button>
-                    <button
-                      type="button"
-                      disabled={simulatingPayment}
-                      onClick={() => handleSimulateDemoPayment("failed")}
-                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-rose-300 bg-white hover:bg-rose-50 disabled:opacity-60 text-rose-700 font-bold cursor-pointer"
-                    >
-                      <XCircle className="h-3.5 w-3.5" />
-                      <span>Simulate Failed / Cancelled</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="text-sm space-y-1.5 border-t border-slate-100 pt-4">
-              <div className="flex justify-between text-slate-600">
+            <div className="divide-y divide-neutral-100 border-t border-b border-neutral-200 text-xs sm:text-sm">
+              <div className="py-3 flex justify-between text-neutral-600">
                 <span>Items Subtotal</span>
-                <span>{formatKes(createdOrder.subtotal_kes)}</span>
+                <span className="tabular-nums text-neutral-950">
+                  {formatKes(createdOrder.subtotal_kes)}
+                </span>
               </div>
-              <div className="flex justify-between text-slate-600">
-                <span>Delivery Fee</span>
-                <span>{formatKes(createdOrder.delivery_fee_kes)}</span>
+              <div className="py-3 flex justify-between text-neutral-600">
+                <span>Delivery Zone Fee</span>
+                <span className="tabular-nums text-neutral-950">
+                  {formatKes(createdOrder.delivery_fee_kes)}
+                </span>
               </div>
               {createdOrder.bulky_surcharge_kes > 0 && (
-                <div className="flex justify-between text-amber-800">
+                <div className="py-3 flex justify-between text-neutral-700">
                   <span>Bulky Item Surcharge</span>
-                  <span>{formatKes(createdOrder.bulky_surcharge_kes)}</span>
+                  <span className="tabular-nums text-neutral-950">
+                    {formatKes(createdOrder.bulky_surcharge_kes)}
+                  </span>
                 </div>
               )}
-              <div className="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-100">
+              <div className="py-3.5 flex justify-between text-sm sm:text-base font-semibold text-neutral-950">
                 <span>Total</span>
-                <span>{formatKes(createdOrder.total_kes)}</span>
+                <span className="tabular-nums">
+                  {formatKes(createdOrder.total_kes)}
+                </span>
               </div>
             </div>
 
-            <div className="flex flex-wrap gap-3 pt-2">
+            <div className="flex flex-wrap items-center gap-4 pt-2">
               <Link
                 href="/orders"
-                className="px-4 py-2.5 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold"
+                className="py-3 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] text-white text-xs sm:text-sm font-semibold transition-colors"
               >
                 View My Orders
               </Link>
               <Link
                 href="/"
-                className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-bold"
+                className="py-3 px-4 text-xs sm:text-sm font-medium text-neutral-600 hover:text-neutral-950 underline underline-offset-4"
               >
                 Continue Shopping
               </Link>
             </div>
           </div>
         ) : items.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center max-w-lg mx-auto space-y-3">
-            <h1 className="text-lg font-bold text-slate-900">
-              Your cart is empty
+          <div className="py-20 text-center max-w-md mx-auto space-y-4">
+            <h1 className="text-xl font-semibold text-neutral-950">
+              Your shopping bag is empty
             </h1>
-            <p className="text-sm text-slate-600">
-              Add at least one item to your cart before checking out.
+            <p className="text-xs sm:text-sm text-neutral-500">
+              Add items to your bag before proceeding to checkout.
             </p>
-            <Link
-              href="/"
-              className="inline-block px-4 py-2.5 rounded-xl bg-teal-700 text-white text-xs font-bold"
-            >
-              Browse Products
-            </Link>
+            <div className="pt-2">
+              <Link
+                href="/"
+                className="inline-block py-3 px-5 rounded-md bg-neutral-950 text-white text-xs font-semibold"
+              >
+                Browse Catalog
+              </Link>
+            </div>
           </div>
         ) : (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-12 pt-8">
             <form
               onSubmit={handlePlaceOrder}
-              className="lg:col-span-7 bg-white border border-slate-200 rounded-2xl p-6 space-y-5"
+              className="lg:col-span-7 space-y-6"
             >
-              <div>
-                <h1 className="text-xl font-bold text-slate-900">Checkout</h1>
+              <div className="border-b border-neutral-200 pb-4">
+                <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950">
+                  Checkout
+                </h1>
                 {userEmail && (
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Signed in as <strong>{userEmail}</strong>
+                  <p className="text-xs text-neutral-500 mt-1">
+                    Account: <span className="text-neutral-900">{userEmail}</span>
                   </p>
                 )}
               </div>
 
               {errorMsg && (
-                <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3.5 text-xs text-red-700">
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>{errorMsg}</span>
+                <div className="border-l-2 border-[#C81E2B] bg-neutral-50 px-4 py-3 text-xs text-[#C81E2B] font-medium">
+                  {errorMsg}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Full Name *
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                    Full Name
                   </label>
                   <input
                     type="text"
                     required
                     value={customerName}
                     onChange={(e) => setCustomerName(e.target.value)}
-                    placeholder="e.g. Brian Otieno"
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
+                    placeholder="Brian Otieno"
+                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Phone Number *
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                    Phone Number
                   </label>
                   <input
                     type="tel"
                     required
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
-                    placeholder="e.g. +254712345678"
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
+                    placeholder="+254712345678"
+                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
                   />
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    WhatsApp Number (Optional)
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                    WhatsApp (Optional)
                   </label>
                   <input
                     type="tel"
                     value={customerWhatsapp}
                     onChange={(e) => setCustomerWhatsapp(e.target.value)}
                     placeholder="Same as phone if blank"
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
+                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Delivery / Pickup Zone *
+                <div className="space-y-1.5">
+                  <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                    Delivery / Pickup Zone
                   </label>
                   <select
                     required
                     disabled={loadingZones}
                     value={selectedZoneId}
                     onChange={(e) => setSelectedZoneId(e.target.value)}
-                    className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white text-slate-900"
+                    className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm font-medium text-neutral-950 focus:outline-none"
                   >
                     {zones.map((z) => (
                       <option key={z.id} value={z.id}>
-                        {z.name} ({formatKes(z.fee_kes)})
+                        {z.name} — {formatKes(z.fee_kes)}
                       </option>
                     ))}
                   </select>
@@ -534,40 +393,40 @@ export default function CheckoutPage() {
               </div>
 
               {selectedZone && (
-                <div className="rounded-xl bg-slate-50 border border-slate-200 p-3.5 text-xs text-slate-700 space-y-1">
-                  <p className="font-semibold text-slate-900">
+                <div className="border-t border-b border-neutral-100 py-3.5 text-xs text-neutral-600 space-y-1">
+                  <p className="font-medium text-neutral-950">
                     {selectedZone.name} • {selectedZone.estimated_delivery_text}
                   </p>
                   {selectedZone.cutoff_time_text && (
-                    <p className="text-slate-500">
-                      {selectedZone.cutoff_time_text}
-                    </p>
+                    <p>{selectedZone.cutoff_time_text}</p>
                   )}
                   {hasBulkyItem && selectedZone.bulky_surcharge_kes > 0 && (
-                    <p className="text-amber-800 font-medium">
+                    <p className="text-neutral-800">
                       Bulky item surcharge:{" "}
-                      {formatKes(selectedZone.bulky_surcharge_kes)}
+                      <span className="font-semibold tabular-nums">
+                        {formatKes(selectedZone.bulky_surcharge_kes)}
+                      </span>
                     </p>
                   )}
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Delivery Landmark / Building / Estate
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                  Delivery Landmark / Estate / Building
                 </label>
                 <input
                   type="text"
                   value={deliveryLandmark}
                   onChange={(e) => setDeliveryLandmark(e.target.value)}
-                  placeholder="e.g. Kilimani, Yaya Centre side, Apartment B4"
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
+                  placeholder="Kilimani, Yaya Centre side, Apartment B4"
+                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
                 />
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
-                  Payment Method (Local Demo Mode)
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
+                  Payment Method
                 </label>
                 <select
                   value={paymentMethod}
@@ -579,33 +438,31 @@ export default function CheckoutPage() {
                         | "pay_on_pickup"
                     )
                   }
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 bg-white text-slate-900"
+                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm font-medium text-neutral-950 focus:outline-none"
                 >
-                  <option value="mpesa_stk">
-                    M-Pesa STK Push (Local Demo — No Daraja Keys Needed)
-                  </option>
+                  <option value="mpesa_stk">M-Pesa</option>
                   <option value="pay_on_delivery">Pay on Delivery</option>
                   <option value="pay_on_pickup">Pay at Shop Pickup</option>
                 </select>
               </div>
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-medium uppercase tracking-wider text-neutral-500">
                   Delivery Notes (Optional)
                 </label>
                 <textarea
                   rows={2}
                   value={deliveryNotes}
                   onChange={(e) => setDeliveryNotes(e.target.value)}
-                  placeholder="Any helpful instructions for rider or shop staff..."
-                  className="w-full px-3 py-2 text-sm rounded-lg border border-slate-300 text-slate-900"
+                  placeholder="Instructions for rider or shop handover"
+                  className="w-full border-b border-neutral-300 focus:border-neutral-950 bg-transparent py-2 text-sm text-neutral-950 focus:outline-none"
                 />
               </div>
 
               <button
                 type="submit"
                 disabled={submitting || items.length === 0}
-                className="w-full py-3 rounded-xl bg-teal-700 hover:bg-teal-800 disabled:opacity-60 text-white text-sm font-bold transition cursor-pointer"
+                className="w-full py-3.5 px-5 rounded-md bg-[#C81E2B] hover:bg-[#A61621] disabled:opacity-50 text-white text-xs sm:text-sm font-semibold tracking-wide transition-colors cursor-pointer tabular-nums"
               >
                 {submitting
                   ? "Placing Order..."
@@ -613,65 +470,70 @@ export default function CheckoutPage() {
               </button>
             </form>
 
-            <aside className="lg:col-span-5 bg-white border border-slate-200 rounded-2xl p-6 space-y-4 h-fit">
-              <h2 className="text-base font-bold text-slate-900">
-                Order Summary
-              </h2>
+            {/* Summary Column */}
+            <aside className="lg:col-span-5 lg:border-l lg:border-neutral-200 lg:pl-10 space-y-6 h-fit">
+              <div className="border-b border-neutral-200 pb-3">
+                <h2 className="text-xs font-semibold uppercase tracking-[0.12em] text-neutral-500">
+                  Order Summary
+                </h2>
+              </div>
 
-              <div className="divide-y divide-slate-100 text-sm">
+              <div className="divide-y divide-neutral-100 text-xs sm:text-sm">
                 {items.map((item) => (
                   <div
                     key={item.productId}
-                    className="py-3 flex items-center justify-between gap-3"
+                    className="py-3.5 flex items-baseline justify-between gap-4"
                   >
                     <div className="min-w-0">
-                      <p className="font-semibold text-slate-900 truncate">
+                      <p className="font-medium text-neutral-950 truncate">
                         {item.name}
                       </p>
-                      <p className="text-xs text-slate-500">
+                      <p className="text-xs text-neutral-500 tabular-nums">
                         {item.quantity} × {formatKes(item.priceKes)}
                       </p>
                     </div>
-                    <span className="font-bold text-slate-900 shrink-0">
+                    <span className="font-semibold text-neutral-950 tabular-nums shrink-0">
                       {formatKes(item.quantity * item.priceKes)}
                     </span>
                   </div>
                 ))}
               </div>
 
-              <div className="border-t border-slate-200 pt-3 space-y-2 text-sm">
-                <div className="flex justify-between text-slate-600">
+              <div className="border-t border-neutral-200 pt-4 space-y-2.5 text-xs sm:text-sm">
+                <div className="flex justify-between text-neutral-600">
                   <span>Subtotal</span>
-                  <span>{formatKes(subtotalKes)}</span>
+                  <span className="tabular-nums text-neutral-950">
+                    {formatKes(subtotalKes)}
+                  </span>
                 </div>
-                <div className="flex justify-between text-slate-600">
-                  <span>Delivery Zone Fee</span>
-                  <span>{formatKes(deliveryFeeKes)}</span>
+                <div className="flex justify-between text-neutral-600">
+                  <span>Delivery Fee</span>
+                  <span className="tabular-nums text-neutral-950">
+                    {formatKes(deliveryFeeKes)}
+                  </span>
                 </div>
                 {bulkySurchargeKes > 0 && (
-                  <div className="flex justify-between text-amber-800">
+                  <div className="flex justify-between text-neutral-700">
                     <span>Bulky Item Surcharge</span>
-                    <span>{formatKes(bulkySurchargeKes)}</span>
+                    <span className="tabular-nums text-neutral-950">
+                      {formatKes(bulkySurchargeKes)}
+                    </span>
                   </div>
                 )}
-                <div className="flex justify-between text-base font-extrabold text-slate-900 pt-2 border-t border-slate-100">
+                <div className="flex justify-between text-sm sm:text-base font-semibold text-neutral-950 pt-3 border-t border-neutral-200">
                   <span>Total Payable</span>
-                  <span>{formatKes(totalKes)}</span>
+                  <span className="tabular-nums">{formatKes(totalKes)}</span>
                 </div>
               </div>
 
-              <div className="rounded-xl bg-slate-50 border border-slate-200 p-3 text-xs text-slate-600 flex items-start gap-2">
-                <ShieldCheck className="h-4 w-4 text-teal-700 shrink-0 mt-0.5" />
-                <span>
-                  Running in local demo mode—transactions are logged in{" "}
-                  <code>payment_transactions</code> without needing live Daraja
-                  credentials.
-                </span>
-              </div>
+              <p className="text-xs text-neutral-500 leading-relaxed border-t border-neutral-100 pt-4">
+                Pricing, stock availability, and your 4-digit handover PIN are
+                issued upon order confirmation.
+              </p>
             </aside>
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }

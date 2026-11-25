@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, KeyRound, Truck, Package, Radio } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type CustomerOrderItem = {
@@ -148,133 +148,142 @@ export default function MyOrdersPage() {
   }, [userId, fetchOrdersForUser]);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
-      <header className="bg-white border-b border-slate-200">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+    <main className="bg-white min-h-screen">
+      <div className="max-w-5xl mx-auto px-4 sm:px-8 pt-6 pb-20 space-y-8">
+        <div className="flex items-center justify-between gap-4 pb-6 border-b border-neutral-200 text-xs">
           <Link
             href="/"
-            className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-900"
+            className="inline-flex items-center gap-2 font-medium text-neutral-600 hover:text-neutral-950 transition-colors"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="h-3.5 w-3.5" />
             <span>Back to Catalog</span>
           </Link>
-          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-teal-700">
-            <Radio className="h-3.5 w-3.5 animate-pulse" />
-            <span>Live Order Updates</span>
+          <span className="inline-flex items-center gap-1.5 text-neutral-500">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600" />
+            <span>Live status</span>
           </span>
         </div>
-      </header>
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">My Orders</h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Updates automatically in real time as your payment, rider, or delivery status changes.
+        <div className="border-b border-neutral-200 pb-5">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#C81E2B]">
+            Account History
+          </p>
+          <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-neutral-950 mt-1">
+            My Orders
+          </h1>
+          <p className="text-xs text-neutral-500 mt-1">
+            Handover PINs, fulfillment progress, dispatch tracking, and warranty
+            records.
           </p>
         </div>
 
         {loading ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-8 text-sm text-slate-500">
+          <div className="py-12 text-sm text-neutral-500">
             Loading your orders...
           </div>
         ) : orders.length === 0 ? (
-          <div className="bg-white border border-slate-200 rounded-2xl p-10 text-center space-y-3">
-            <Package className="h-8 w-8 text-slate-400 mx-auto" />
-            <h2 className="text-base font-bold text-slate-900">
+          <div className="py-16 text-center border-b border-neutral-200 space-y-3">
+            <h2 className="text-base font-semibold text-neutral-950">
               No orders yet
             </h2>
-            <p className="text-xs text-slate-600">
-              Once you place an order, it will appear here automatically.
+            <p className="text-xs sm:text-sm text-neutral-500">
+              Your orders and handover PINs will appear here once placed.
             </p>
-            <Link
-              href="/"
-              className="inline-block px-4 py-2 rounded-xl bg-teal-700 text-white text-xs font-bold"
-            >
-              Browse Catalog
-            </Link>
+            <div className="pt-2">
+              <Link
+                href="/"
+                className="inline-block py-2.5 px-5 rounded-md bg-neutral-950 text-white text-xs font-semibold"
+              >
+                Browse Catalog
+              </Link>
+            </div>
           </div>
         ) : (
-          <div className="space-y-4">
+          <div className="divide-y divide-neutral-200 border-t border-b border-neutral-200">
             {orders.map((order) => (
-              <article
-                key={order.id}
-                className="bg-white border border-slate-200 rounded-2xl p-6 space-y-4"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
+              <article key={order.id} className="py-7 space-y-5">
+                <div className="flex flex-wrap items-baseline justify-between gap-4">
                   <div>
-                    <h2 className="text-base font-extrabold text-slate-900">
+                    <h2 className="text-base sm:text-lg font-semibold text-neutral-950 tabular-nums">
                       {order.order_number}
                     </h2>
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs text-neutral-500 mt-0.5">
                       {new Date(order.created_at).toLocaleString()}
                     </p>
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-teal-50 text-teal-800 border border-teal-200">
-                      <KeyRound className="h-3.5 w-3.5" />
+                  <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-xs">
+                    <span className="font-semibold text-[#C81E2B] tabular-nums">
                       PIN: {order.delivery_code}
                     </span>
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-800 border border-amber-200 capitalize">
+                    <span className="text-neutral-700 capitalize">
                       {order.fulfillment_status.replaceAll("_", " ")}
                     </span>
-                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700 capitalize">
+                    <span className="text-neutral-500 capitalize">
                       Payment: {order.payment_status.replaceAll("_", " ")}
                     </span>
                   </div>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-between gap-4 text-sm">
-                  <div className="space-y-0.5">
-                    <p className="font-semibold text-slate-900 flex items-center gap-1.5">
-                      <Truck className="h-4 w-4 text-teal-700" />
-                      <span>{order.delivery_zone_name}</span>
+                <div className="flex flex-wrap items-baseline justify-between gap-4 text-xs sm:text-sm">
+                  <div className="space-y-1">
+                    <p className="font-medium text-neutral-950">
+                      {order.delivery_zone_name}
                     </p>
                     {order.rider_or_courier_name && (
-                      <p className="text-xs text-slate-600">
-                        Rider / Courier:{" "}
-                        <strong>{order.rider_or_courier_name}</strong>
+                      <p className="text-xs text-neutral-600">
+                        Courier / Rider:{" "}
+                        <span className="font-medium text-neutral-900">
+                          {order.rider_or_courier_name}
+                        </span>
                       </p>
                     )}
                     {order.tracking_or_waybill_number && (
-                      <p className="text-xs text-slate-600">
-                        Tracking / Waybill:{" "}
-                        <strong>{order.tracking_or_waybill_number}</strong>
+                      <p className="text-xs text-neutral-600">
+                        Waybill / Tracking:{" "}
+                        <span className="font-medium text-neutral-900 tabular-nums">
+                          {order.tracking_or_waybill_number}
+                        </span>
                       </p>
                     )}
                   </div>
 
                   <div className="text-right">
-                    <p className="text-xs text-slate-500">Total</p>
-                    <p className="text-lg font-extrabold text-slate-900">
+                    <p className="text-[11px] uppercase tracking-wider text-neutral-400">
+                      Total
+                    </p>
+                    <p className="text-base sm:text-lg font-semibold text-neutral-950 tabular-nums">
                       {formatKes(order.total_kes)}
                     </p>
                   </div>
                 </div>
 
-                <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 space-y-2">
+                <div className="border-t border-neutral-100 divide-y divide-neutral-100">
                   {order.items.map((item) => (
                     <div
                       key={item.id}
-                      className="flex items-center justify-between text-xs bg-white border border-slate-200 rounded-lg px-3 py-2"
+                      className="py-3 flex items-baseline justify-between gap-4 text-xs sm:text-sm"
                     >
-                      <div>
-                        <p className="font-semibold text-slate-900">
-                          {item.product_name} × {item.quantity}
+                      <div className="space-y-0.5">
+                        <p className="font-medium text-neutral-950">
+                          {item.product_name}{" "}
+                          <span className="text-neutral-500 tabular-nums">
+                            × {item.quantity}
+                          </span>
                         </p>
                         {item.warranty_summary && (
-                          <p className="text-[11px] text-slate-500">
+                          <p className="text-xs text-neutral-500">
                             {item.warranty_summary}
                           </p>
                         )}
                         {Array.isArray(item.serial_numbers) &&
                           item.serial_numbers.length > 0 && (
-                            <p className="text-[11px] text-teal-700 font-medium">
-                              IMEI / Serial: {item.serial_numbers.join(", ")}
+                            <p className="text-xs text-neutral-700 tabular-nums">
+                              Serial / IMEI: {item.serial_numbers.join(", ")}
                             </p>
                           )}
                       </div>
-                      <span className="font-bold text-slate-900">
+                      <span className="font-medium text-neutral-950 tabular-nums shrink-0">
                         {formatKes(item.line_total_kes)}
                       </span>
                     </div>
@@ -284,7 +293,7 @@ export default function MyOrdersPage() {
             ))}
           </div>
         )}
-      </main>
-    </div>
+      </div>
+    </main>
   );
 }
