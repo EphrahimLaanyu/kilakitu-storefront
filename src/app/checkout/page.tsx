@@ -11,6 +11,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { isGoogleUser } from "@/lib/auth/profile";
 import { useCart } from "@/components/storefront/CartContext";
 import type { StorefrontDeliveryZone } from "@/lib/db/storefront";
 
@@ -78,8 +79,10 @@ export default function CheckoutPage() {
     async function loadUserProfile(user: {
       id: string;
       email?: string | null;
+      app_metadata?: Record<string, unknown>;
+      identities?: Array<{ provider: string }>;
       user_metadata?: Record<string, unknown>;
-    }) {
+    }): Promise<boolean> {
       const switchedAccount =
         activeUserIdRef.current !== null && activeUserIdRef.current !== user.id;
       activeUserIdRef.current = user.id;
@@ -100,7 +103,15 @@ export default function CheckoutPage() {
         .eq("id", user.id)
         .maybeSingle();
 
-      if (!active || activeUserIdRef.current !== user.id) return;
+      if (!active || activeUserIdRef.current !== user.id) return false;
+
+      if (
+        isGoogleUser(user as Parameters<typeof isGoogleUser>[0]) &&
+        !profile?.phone?.trim()
+      ) {
+        router.replace("/signup?mode=complete&next=%2Fcheckout");
+        return false;
+      }
 
       const metaFullName =
         typeof user.user_metadata?.full_name === "string"
@@ -115,9 +126,11 @@ export default function CheckoutPage() {
 
       setCustomerName(profile?.full_name?.trim() || metaFullName.trim() || "");
       setCustomerPhone(profile?.phone?.trim() || metaPhone.trim() || "");
+      return true;
     }
 
     async function initCheckout() {
+      let redirected = false;
       try {
         const {
           data: { user },
@@ -127,12 +140,17 @@ export default function CheckoutPage() {
           if (active) {
             resetUserSpecificState();
           }
+          redirected = true;
           router.replace("/login?next=%2Fcheckout");
           return;
         }
 
         if (!active) return;
-        await loadUserProfile(user);
+        const canContinue = await loadUserProfile(user);
+        if (!canContinue || !active) {
+          redirected = true;
+          return;
+        }
 
         const storeSlug =
           process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
@@ -169,7 +187,7 @@ export default function CheckoutPage() {
           setSelectedZoneId(list[0].id);
         }
       } finally {
-        if (active) {
+        if (active && !redirected) {
           setLoadingZones(false);
           setAuthChecked(true);
         }

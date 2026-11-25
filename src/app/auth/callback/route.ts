@@ -2,7 +2,7 @@ import type { EmailOtpType } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { sanitizeNextPath } from "@/lib/auth/redirects";
-import { syncUserProfile } from "@/lib/auth/profile";
+import { isProfileComplete, syncUserProfile } from "@/lib/auth/profile";
 
 const VALID_OTP_TYPES = new Set<EmailOtpType>([
   "signup",
@@ -68,7 +68,28 @@ export async function GET(request: Request) {
     } = await supabase.auth.getUser();
 
     if (user) {
-      await syncUserProfile(supabase, user);
+      // Password recovery callbacks must continue directly to /reset-password.
+      const isPasswordRecovery =
+        typeParam === "recovery" || safeNext.startsWith("/reset-password");
+
+      if (!isPasswordRecovery) {
+        const { data: existingProfile } = await supabase
+          .from("profiles")
+          .select("full_name, phone")
+          .eq("id", user.id)
+          .maybeSingle();
+
+        const syncResult = await syncUserProfile(supabase, user);
+        const profileReady =
+          isProfileComplete(existingProfile) || syncResult.isComplete;
+
+        if (!profileReady) {
+          const completeUrl = new URL("/signup", redirectOrigin);
+          completeUrl.searchParams.set("mode", "complete");
+          completeUrl.searchParams.set("next", safeNext);
+          return NextResponse.redirect(completeUrl);
+        }
+      }
     }
 
     return NextResponse.redirect(`${redirectOrigin}${safeNext}`);
