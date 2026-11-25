@@ -61,6 +61,55 @@ export function isProfileComplete(
 }
 
 /**
+ * Safely upserts `public.profiles` with `id`, `email`, `full_name`, `phone`,
+ * and `profile_completed: true` when complete. If the `profile_completed`
+ * column is absent in the target schema, automatically retries without it.
+ */
+export async function upsertProfileSafe(
+  supabase: SupabaseClient,
+  payload: {
+    id: string;
+    email: string | null;
+    full_name: string;
+    phone: string | null;
+    markCompleted?: boolean;
+  }
+): Promise<{ error: string | null }> {
+  const baseRecord = {
+    id: payload.id,
+    email: payload.email,
+    full_name: payload.full_name,
+    phone: payload.phone,
+  };
+
+  if (payload.markCompleted) {
+    const { error } = await supabase
+      .from("profiles")
+      .upsert({ ...baseRecord, profile_completed: true }, { onConflict: "id" });
+
+    if (!error) {
+      return { error: null };
+    }
+
+    const msg = error.message.toLowerCase();
+    const isMissingColumn =
+      error.code === "42703" ||
+      error.code === "PGRST204" ||
+      msg.includes("profile_completed");
+
+    if (!isMissingColumn) {
+      return { error: error.message };
+    }
+  }
+
+  const { error } = await supabase
+    .from("profiles")
+    .upsert(baseRecord, { onConflict: "id" });
+
+  return { error: error ? error.message : null };
+}
+
+/**
  * Ensures a `public.profiles` row exists and is synced for the authenticated user
  * with `id`, `full_name`, `phone`, and `email`.
  * Never throws or crashes when a profile row is missing or already exists.
@@ -117,28 +166,20 @@ export async function syncUserProfile(
       phone: resolvedPhone,
     };
 
-    const { error } = await supabase.from("profiles").upsert(
-      {
-        id: user.id,
-        email: resolvedProfile.email,
-        full_name: resolvedProfile.full_name,
-        phone: resolvedProfile.phone,
-      },
-      { onConflict: "id" }
-    );
+    const complete = isProfileComplete(resolvedProfile);
 
-    if (error) {
-      return {
-        error: error.message,
-        profile: resolvedProfile,
-        isComplete: isProfileComplete(resolvedProfile),
-      };
-    }
+    const { error } = await upsertProfileSafe(supabase, {
+      id: user.id,
+      email: resolvedEmail,
+      full_name: resolvedFullName,
+      phone: resolvedPhone,
+      markCompleted: complete,
+    });
 
     return {
-      error: null,
+      error,
       profile: resolvedProfile,
-      isComplete: isProfileComplete(resolvedProfile),
+      isComplete: complete,
     };
   } catch (err) {
     return {

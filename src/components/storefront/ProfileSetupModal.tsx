@@ -8,6 +8,7 @@ import {
   getGoogleProvidedFields,
   isGoogleUser,
   isProfileComplete as checkProfileComplete,
+  upsertProfileSafe,
 } from "@/lib/auth/profile";
 import { useCart, type ProfileSetupReason } from "./CartContext";
 
@@ -200,18 +201,16 @@ function ProfileSetupModalInner() {
         return;
       }
 
-      const { error } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          email: trimmedEmail || user.email || null,
-          full_name: trimmedName,
-          phone: trimmedPhone,
-        },
-        { onConflict: "id" }
-      );
+      const { error } = await upsertProfileSafe(supabase, {
+        id: user.id,
+        email: trimmedEmail || user.email || null,
+        full_name: trimmedName,
+        phone: trimmedPhone,
+        markCompleted: true,
+      });
 
       if (error) {
-        setErrorMsg(error.message);
+        setErrorMsg(error);
         setSubmitting(false);
         return;
       }

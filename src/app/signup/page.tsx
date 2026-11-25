@@ -12,6 +12,7 @@ import {
   isGoogleUser,
   isProfileComplete,
   syncUserProfile,
+  upsertProfileSafe,
 } from "@/lib/auth/profile";
 import { GoogleAuthButton } from "@/components/storefront/GoogleAuthButton";
 
@@ -198,18 +199,16 @@ function SignupFormInner() {
         return;
       }
 
-      const { error } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          email: trimmedEmail || user.email || null,
-          full_name: trimmedName,
-          phone: trimmedPhone,
-        },
-        { onConflict: "id" }
-      );
+      const { error } = await upsertProfileSafe(supabase, {
+        id: user.id,
+        email: trimmedEmail || user.email || null,
+        full_name: trimmedName,
+        phone: trimmedPhone,
+        markCompleted: true,
+      });
 
       if (error) {
-        setErrorMsg(error.message);
+        setErrorMsg(error);
         setSubmitting(false);
         return;
       }
@@ -257,7 +256,7 @@ function SignupFormInner() {
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
             safeNext
-          )}`,
+          )}&email=${encodeURIComponent(trimmedEmail)}`,
           data: {
             full_name: trimmedName,
             phone: trimmedPhone,
@@ -322,7 +321,7 @@ function SignupFormInner() {
         options: {
           emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(
             safeNext
-          )}`,
+          )}&email=${encodeURIComponent(pendingConfirmationEmail)}`,
         },
       });
       if (error) {
