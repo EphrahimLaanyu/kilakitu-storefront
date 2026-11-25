@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, KeyRound, Truck, Package } from "lucide-react";
+import { ArrowLeft, KeyRound, Truck, Package, Radio } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 
 type CustomerOrderItem = {
@@ -13,6 +13,7 @@ type CustomerOrderItem = {
   unit_price_kes: number;
   line_total_kes: number;
   warranty_summary: string | null;
+  serial_numbers?: string[];
 };
 
 type CustomerOrderRow = {
@@ -36,27 +37,19 @@ function formatKes(amount: number) {
 export default function MyOrdersPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   const [orders, setOrders] = useState<CustomerOrderRow[]>([]);
   const [payingOrderId, setPayingOrderId] = useState<string | null>(null);
   const [payError, setPayError] = useState<string | null>(null);
 
-  async function loadMyOrders() {
+  const fetchOrdersForUser = useCallback(async (uid: string) => {
     const supabase = createClient();
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    if (!user) {
-      router.replace("/login?next=/orders");
-      return;
-    }
-
     const { data: orderRows } = await supabase
       .from("orders")
       .select(
         "id, order_number, delivery_code, payment_status, fulfillment_status, delivery_zone_name, total_kes, rider_or_courier_name, tracking_or_waybill_number, created_at"
       )
-      .eq("customer_user_id", user.id)
+      .eq("customer_user_id", uid)
       .order("created_at", { ascending: false });
 
     const list = orderRows ?? [];
@@ -70,7 +63,7 @@ export default function MyOrdersPage() {
     const { data: itemRows } = await supabase
       .from("order_items")
       .select(
-        "id, order_id, product_name, quantity, unit_price_kes, line_total_kes, warranty_summary"
+        "id, order_id, product_name, quantity, unit_price_kes, line_total_kes, warranty_summary, serial_numbers"
       )
       .in("order_id", ids);
 
@@ -88,31 +81,76 @@ export default function MyOrdersPage() {
       }))
     );
     setLoading(false);
-  }
+  }, []);
 
   useEffect(() => {
     let active = true;
-    loadMyOrders().finally(() => {
-      if (!active) setLoading(false);
+    const supabase = createClient();
+
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!active) return;
+      if (!user) {
+        router.replace("/login?next=/orders");
+        return;
+      }
+      setUserId(user.id);
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const ref = urlParams.get("reference") || urlParams.get("trxref");
+      if (ref) {
+        await fetch("/api/payments/paystack/verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ reference: ref }),
+        }).catch(() => null);
+        window.history.replaceState({}, "", "/orders");
+      }
+
+      if (active) {
+        await fetchOrdersForUser(user.id);
+      }
     });
 
+    return () => {
+      active = false;
+    };
+  }, [router, fetchOrdersForUser]);
+
+  useEffect(() => {
+    if (!userId) return;
     const supabase = createClient();
+
     const channel = supabase
-      .channel("storefront-customer-orders")
+      .channel(`customer-orders-${userId}`)
       .on(
         "postgres_changes",
-        { event: "*", schema: "public", table: "orders" },
+        {
+          event: "*",
+          schema: "public",
+          table: "orders",
+          filter: `customer_user_id=eq.${userId}`,
+        },
         () => {
-          if (active) loadMyOrders();
+          fetchOrdersForUser(userId);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "payment_transactions",
+        },
+        () => {
+          fetchOrdersForUser(userId);
         }
       )
       .subscribe();
 
     return () => {
-      active = false;
       supabase.removeChannel(channel);
     };
-  }, []);
+  }, [userId, fetchOrdersForUser]);
 
   async function handlePayWithPaystack(orderId: string) {
     setPayError(null);
@@ -150,7 +188,10 @@ export default function MyOrdersPage() {
             <ArrowLeft className="h-4 w-4" />
             <span>Back to Catalog</span>
           </Link>
-          <span className="text-xs font-semibold text-[#C81E2B]">My Orders</span>
+          <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#C81E2B]">
+            <Radio className="h-3.5 w-3.5 animate-pulse" />
+            <span>Live Order Updates</span>
+          </span>
         </div>
       </header>
 

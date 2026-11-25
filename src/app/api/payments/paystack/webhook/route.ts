@@ -68,13 +68,13 @@ export async function POST(request: Request) {
 
     const admin = createAdminClient(supabaseUrl, serviceRoleKey);
 
-    const { data: txRow } = await admin
+    const { data: txRow, error: txLookupError } = await admin
       .from("payment_transactions")
       .select("id, order_id, amount_kes, status")
       .eq("provider_reference", reference)
       .single();
 
-    if (!txRow) {
+    if (txLookupError || !txRow) {
       return NextResponse.json({ received: true }, { status: 200 });
     }
 
@@ -84,7 +84,7 @@ export async function POST(request: Request) {
       const currency = String(data?.currency ?? "").toUpperCase();
 
       if (currency === "KES" && paidSubunits >= expectedSubunits) {
-        await admin
+        const { error: txUpdateError } = await admin
           .from("payment_transactions")
           .update({
             status: "success",
@@ -92,13 +92,27 @@ export async function POST(request: Request) {
           })
           .eq("id", txRow.id);
 
-        await admin
+        if (txUpdateError) {
+          return NextResponse.json(
+            { error: `Failed to update payment_transactions: ${txUpdateError.message}` },
+            { status: 500 }
+          );
+        }
+
+        const { error: orderUpdateError } = await admin
           .from("orders")
           .update({
             payment_status: "paid",
             paid_at: new Date().toISOString(),
           })
           .eq("id", txRow.order_id);
+
+        if (orderUpdateError) {
+          return NextResponse.json(
+            { error: `Failed to update orders: ${orderUpdateError.message}` },
+            { status: 500 }
+          );
+        }
       }
     } else if (eventName === "charge.failed") {
       if (txRow.status !== "success") {
