@@ -26,6 +26,11 @@ export const metadata: Metadata = {
   },
   description:
     "Shop genuine phones, laptops, TVs, and electronics in Kenya with verified warranties, transparent delivery fees, and secure handover PINs.",
+  icons: {
+    icon: [{ url: "/favicon.png", type: "image/png" }],
+    shortcut: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default async function RootLayout({
