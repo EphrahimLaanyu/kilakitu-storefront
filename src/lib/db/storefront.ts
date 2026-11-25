@@ -1,4 +1,19 @@
-import { createClient } from "@/lib/supabase/server";
+import { cache } from "react";
+import { createClient as createSupabaseJsClient } from "@supabase/supabase-js";
+
+function createPublicClient() {
+  return createSupabaseJsClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      auth: {
+        persistSession: false,
+        autoRefreshToken: false,
+        detectSessionInUrl: false,
+      },
+    }
+  );
+}
 
 export type StorefrontCategory = {
   id: string;
@@ -93,41 +108,43 @@ export type StorefrontCatalogFilter = {
   onlyAvailable?: boolean;
 };
 
-export async function getActiveStoreBySlug(
-  slug: string
-): Promise<StorefrontStoreInfo | null> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("stores")
-    .select(
-      "id, name, slug, description, logo_url, primary_color, phone, whatsapp_number, pickup_address, opening_hours"
-    )
-    .eq("slug", slug)
-    .eq("is_active", true)
-    .single();
+export const getActiveStoreBySlug = cache(
+  async (slug: string): Promise<StorefrontStoreInfo | null> => {
+    const supabase = createPublicClient();
+    const { data, error } = await supabase
+      .from("stores")
+      .select(
+        "id, name, slug, description, logo_url, primary_color, phone, whatsapp_number, pickup_address, opening_hours"
+      )
+      .eq("slug", slug)
+      .eq("is_active", true)
+      .single();
 
-  if (error || !data) {
-    return null;
+    if (error || !data) {
+      return null;
+    }
+
+    return data as StorefrontStoreInfo;
   }
+);
 
-  return data as StorefrontStoreInfo;
-}
+export const getStorefrontCategories = cache(
+  async (): Promise<StorefrontCategory[]> => {
+    const supabase = createPublicClient();
+    const { data, error } = await supabase
+      .from("categories")
+      .select("id, name, slug, description, image_url, sort_order")
+      .eq("is_active", true)
+      .order("sort_order", { ascending: true })
+      .order("name", { ascending: true });
 
-export async function getStorefrontCategories(): Promise<StorefrontCategory[]> {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("categories")
-    .select("id, name, slug, description, image_url, sort_order")
-    .eq("is_active", true)
-    .order("sort_order", { ascending: true })
-    .order("name", { ascending: true });
+    if (error) {
+      throw new Error(`Failed to load storefront categories: ${error.message}`);
+    }
 
-  if (error) {
-    throw new Error(`Failed to load storefront categories: ${error.message}`);
+    return (data ?? []) as StorefrontCategory[];
   }
-
-  return (data ?? []) as StorefrontCategory[];
-}
+);
 
 export async function getStorefrontProducts(
   storeId: string,
@@ -136,8 +153,9 @@ export async function getStorefrontProducts(
   products: StorefrontProductCard[];
   brands: string[];
 }> {
-  const supabase = await createClient();
+  const supabase = createPublicClient();
 
+  // Deduplicated via React cache() with RootLayout and HomePage.
   const categories = await getStorefrontCategories();
   const categoryById = new Map<string, StorefrontCategory>();
   const categoryBySlug = new Map<string, StorefrontCategory>();
@@ -213,18 +231,14 @@ export async function getStorefrontProducts(
 
   const productRows = rows ?? [];
 
-  const { data: brandRows } = await supabase
-    .from("products")
-    .select("brand")
-    .eq("store_id", storeId)
-    .eq("is_published", true)
-    .is("deleted_at", null);
-
   const brandSet = new Set<string>();
-  for (const b of brandRows ?? []) {
-    if (b.brand?.trim()) {
-      brandSet.add(b.brand.trim());
+  for (const row of productRows) {
+    if (row.brand?.trim()) {
+      brandSet.add(row.brand.trim());
     }
+  }
+  if (filters.brand && filters.brand !== "all" && filters.brand.trim()) {
+    brandSet.add(filters.brand.trim());
   }
   const brands = Array.from(brandSet).sort((a, b) => a.localeCompare(b));
 
@@ -237,9 +251,9 @@ export async function getStorefrontProducts(
   if (productIds.length > 0) {
     const { data: images } = await supabase
       .from("product_images")
-      .select("product_id, public_url, alt_text, is_primary, sort_order")
+      .select("product_id, public_url, alt_text, sort_order")
       .in("product_id", productIds)
-      .order("is_primary", { ascending: false })
+      .eq("is_primary", true)
       .order("sort_order", { ascending: true });
 
     for (const img of images ?? []) {
@@ -287,10 +301,10 @@ export async function getStorefrontProducts(
 }
 
 export async function getStorefrontProductBySlug(
-  storeId: string,
+  store: StorefrontStoreInfo,
   slug: string
 ): Promise<StorefrontProductDetail | null> {
-  const supabase = await createClient();
+  const supabase = createPublicClient();
 
   const { data: product, error } = await supabase
     .from("products")
@@ -319,7 +333,7 @@ export async function getStorefrontProductBySlug(
       is_featured
     `
     )
-    .eq("store_id", storeId)
+    .eq("store_id", store.id)
     .eq("slug", slug)
     .eq("is_published", true)
     .is("deleted_at", null)
@@ -329,27 +343,12 @@ export async function getStorefrontProductBySlug(
     return null;
   }
 
-  const storeSlug =
-    process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
-
-  const [store, { data: images }, categories] = await Promise.all([
-    getActiveStoreBySlug(storeSlug),
-    supabase
-      .from("product_images")
-      .select("id, public_url, alt_text, is_primary, sort_order")
-      .eq("product_id", product.id)
-      .order("is_primary", { ascending: false })
-      .order("sort_order", { ascending: true }),
-    getStorefrontCategories(),
-  ]);
-
-  if (!store) {
-    return null;
-  }
-
-  const cat = product.category_id
-    ? categories.find((c) => c.id === product.category_id)
-    : undefined;
+  const { data: images } = await supabase
+    .from("product_images")
+    .select("id, public_url, alt_text, is_primary, sort_order")
+    .eq("product_id", product.id)
+    .order("is_primary", { ascending: false })
+    .order("sort_order", { ascending: true });
 
   const rawSpecs =
     product.specs &&
@@ -396,8 +395,8 @@ export async function getStorefrontProductBySlug(
     is_featured: product.is_featured,
     primary_image_url: primaryImg?.public_url ?? null,
     primary_image_alt: primaryImg?.alt_text ?? product.name,
-    category_name: cat?.name ?? null,
-    category_slug: cat?.slug ?? null,
+    category_name: null,
+    category_slug: null,
     images: gallery,
     store,
   };
@@ -406,7 +405,7 @@ export async function getStorefrontProductBySlug(
 export async function getPublishedStorePolicies(
   storeId: string
 ): Promise<StorefrontPolicy[]> {
-  const supabase = await createClient();
+  const supabase = createPublicClient();
   const { data, error } = await supabase
     .from("store_policies")
     .select("id, policy_type, title, content_markdown")

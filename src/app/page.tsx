@@ -6,7 +6,7 @@ import {
 } from "@/lib/db/storefront";
 import { CatalogAddToCartButton } from "@/components/storefront/CatalogAddToCartButton";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 function formatKes(amount: number) {
   return `KES ${amount.toLocaleString("en-KE")}`;
@@ -74,7 +74,10 @@ export default async function StorefrontHomePage({
   const storeSlug =
     process.env.NEXT_PUBLIC_STORE_SLUG || "kilakitu-electronics";
 
-  const store = await getActiveStoreBySlug(storeSlug);
+  const [store, categories] = await Promise.all([
+    getActiveStoreBySlug(storeSlug),
+    getStorefrontCategories(),
+  ]);
 
   if (!store) {
     return (
@@ -89,21 +92,18 @@ export default async function StorefrontHomePage({
     );
   }
 
-  const [categories, { products, brands }] = await Promise.all([
-    getStorefrontCategories(),
-    getStorefrontProducts(store.id, {
-      search: searchQuery || undefined,
-      categorySlug: categorySlug !== "all" ? categorySlug : undefined,
-      brand: brandFilter !== "all" ? brandFilter : undefined,
-      maxPriceKes:
-        typeof maxPriceNum === "number" &&
-        Number.isFinite(maxPriceNum) &&
-        maxPriceNum > 0
-          ? maxPriceNum
-          : undefined,
-      onlyAvailable,
-    }),
-  ]);
+  const { products, brands } = await getStorefrontProducts(store.id, {
+    search: searchQuery || undefined,
+    categorySlug: categorySlug !== "all" ? categorySlug : undefined,
+    brand: brandFilter !== "all" ? brandFilter : undefined,
+    maxPriceKes:
+      typeof maxPriceNum === "number" &&
+      Number.isFinite(maxPriceNum) &&
+      maxPriceNum > 0
+        ? maxPriceNum
+        : undefined,
+    onlyAvailable,
+  });
 
   const activeCategoryObj =
     categorySlug !== "all"
@@ -286,7 +286,7 @@ export default async function StorefrontHomePage({
             aria-label="Products"
             className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-x-4 gap-y-10 sm:gap-x-7 sm:gap-y-12"
           >
-            {products.map((product) => {
+            {products.map((product, index) => {
               const stock = getStockMeta(product.stock_status);
               const warranty = getWarrantyText(
                 product.warranty_type,
@@ -312,6 +312,7 @@ export default async function StorefrontHomePage({
                 >
                   <Link
                     href={`/products/${product.slug}`}
+                    prefetch={false}
                     className="block flex-1"
                   >
                     {/* Clean Studio Product Canvas */}
@@ -320,6 +321,8 @@ export default async function StorefrontHomePage({
                         <img
                           src={product.primary_image_url}
                           alt={product.primary_image_alt || product.name}
+                          loading={index < 4 ? "eager" : "lazy"}
+                          decoding="async"
                           className="w-full h-full object-contain group-hover:scale-[1.03] transition-transform duration-300"
                         />
                       ) : (

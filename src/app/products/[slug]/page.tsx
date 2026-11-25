@@ -7,7 +7,7 @@ import {
 } from "@/lib/db/storefront";
 import { AddToCartButton } from "@/components/storefront/AddToCartButton";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 function formatKes(amount: number) {
   return `KES ${amount.toLocaleString("en-KE")}`;
@@ -60,7 +60,7 @@ export default async function ProductDetailPage({
     notFound();
   }
 
-  const product = await getStorefrontProductBySlug(store.id, slug);
+  const product = await getStorefrontProductBySlug(store, slug);
   if (!product) {
     notFound();
   }
@@ -104,6 +104,7 @@ export default async function ProductDetailPage({
                 <img
                   src={product.primary_image_url}
                   alt={product.primary_image_alt || product.name}
+                  decoding="async"
                   className="w-full h-full object-contain"
                 />
               ) : (
@@ -123,6 +124,8 @@ export default async function ProductDetailPage({
                     <img
                       src={img.public_url}
                       alt={img.alt_text || product.name}
+                      loading="lazy"
+                      decoding="async"
                       className="w-full h-full object-contain"
                     />
                   </div>

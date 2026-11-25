@@ -1,14 +1,58 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
+const AUTH_SESSION_PREFIXES = [
+  "/checkout",
+  "/orders",
+  "/account",
+  "/onboarding",
+  "/reset-password",
+  "/api/payments",
+];
+
+function isAuthSensitivePath(pathname: string): boolean {
+  return AUTH_SESSION_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
+}
+
+function isPrefetchRequest(request: NextRequest): boolean {
+  return (
+    request.headers.get("next-router-prefetch") === "1" ||
+    request.headers.get("purpose") === "prefetch"
+  );
+}
+
+function hasSupabaseAuthCookie(request: NextRequest): boolean {
+  return request.cookies
+    .getAll()
+    .some(
+      ({ name }) => name.startsWith("sb-") && name.includes("-auth-token")
+    );
+}
+
 /**
- * Refreshes the Supabase auth session on incoming requests and keeps
- * request + response cookies synchronized across SSR, Route Handlers, and Client.
+ * Refreshes the Supabase auth session only when auth cookies are present on
+ * auth-sensitive routes (skipping anonymous traffic, public catalog/product
+ * routes, and RSC prefetches so navigation never blocks on unnecessary
+ * Supabase Auth round-trips).
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   });
+
+  if (isPrefetchRequest(request)) {
+    return supabaseResponse;
+  }
+
+  if (!hasSupabaseAuthCookie(request)) {
+    return supabaseResponse;
+  }
+
+  if (!isAuthSensitivePath(request.nextUrl.pathname)) {
+    return supabaseResponse;
+  }
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -36,7 +80,6 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Always use getUser() to verify and refresh expired tokens against Supabase Auth.
   await supabase.auth.getUser();
 
   return supabaseResponse;

@@ -284,17 +284,43 @@ function StorefrontNavbarInner({
       {/* Primary Utility Bar */}
       <div className="max-w-7xl mx-auto px-4 sm:px-8">
         <div className="h-16 md:h-20 flex items-center justify-between gap-4 md:gap-8">
-          {/* Brand Logo */}
+          {/* Brand Logo (Lightweight Inline SVG Mark + Wordmark) */}
           <Link
             href="/"
+            prefetch={false}
             aria-label="KilaKitu Home"
-            className="shrink-0 flex items-center focus:outline-none"
+            className="shrink-0 inline-flex items-center gap-2.5 focus:outline-none group"
           >
-            <img
-              src="/logo11.svg"
-              alt="KilaKitu.co.ke"
-              className="h-9 sm:h-10 md:h-11 w-auto object-contain"
-            />
+            <svg
+              width="32"
+              height="32"
+              viewBox="0 0 32 32"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+              aria-hidden="true"
+              className="h-8 w-8 shrink-0"
+            >
+              <rect width="32" height="32" rx="7" fill="#C81E2B" />
+              <path
+                d="M10 8.5V23.5M10 16L18.5 8.5M14.2 12.3L22 23.5"
+                stroke="#FFFFFF"
+                strokeWidth="2.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <circle cx="22.5" cy="9.5" r="2.2" fill="#D4A024" />
+            </svg>
+            <span className="flex flex-col leading-none">
+              <span className="text-base sm:text-lg font-extrabold tracking-tight text-neutral-950">
+                Kila<span className="text-[#C81E2B]">Kitu</span>
+                <span className="text-[11px] sm:text-xs font-semibold text-neutral-400">
+                  .co.ke
+                </span>
+              </span>
+              <span className="text-[9px] font-semibold uppercase tracking-[0.16em] text-neutral-400 mt-0.5 hidden sm:block">
+                Genuine Tech Store
+              </span>
+            </span>
           </Link>
 
           {/* Desktop Dynamic Search */}
@@ -354,6 +380,7 @@ function StorefrontNavbarInner({
                           <Link
                             key={cat.id}
                             href={`/?category=${encodeURIComponent(cat.slug)}`}
+                            prefetch={false}
                             onClick={() => setSearchFocused(false)}
                             className="flex items-center justify-between px-4 py-2 hover:bg-neutral-50 text-xs font-medium text-neutral-900"
                           >
@@ -373,6 +400,7 @@ function StorefrontNavbarInner({
                           <Link
                             key={prod.id}
                             href={`/products/${prod.slug}`}
+                            prefetch={false}
                             onClick={() => setSearchFocused(false)}
                             className="flex items-center justify-between gap-3 px-4 py-2.5 hover:bg-neutral-50 transition"
                           >
@@ -593,6 +621,7 @@ function StorefrontNavbarInner({
           <div className="flex items-center gap-6 overflow-x-auto no-scrollbar text-xs whitespace-nowrap">
             <Link
               href="/"
+              prefetch={false}
               className={`py-3 border-b-2 transition-colors shrink-0 ${
                 pathname === "/" && activeCategory === "all"
                   ? "border-[#C81E2B] text-neutral-950 font-semibold"
@@ -608,6 +637,7 @@ function StorefrontNavbarInner({
                 <Link
                   key={cat.id}
                   href={`/?category=${encodeURIComponent(cat.slug)}`}
+                  prefetch={false}
                   className={`py-3 border-b-2 transition-colors shrink-0 ${
                     isSelected
                       ? "border-[#C81E2B] text-neutral-950 font-semibold"
